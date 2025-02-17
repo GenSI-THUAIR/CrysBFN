@@ -284,6 +284,7 @@ class AccuracySchedule(torch.nn.Module):
     
     
 if __name__ == '__main__':
+    # you may need this file to get a pre-computed linear entropy alpha schedule
     n_steps = 10
     beta1 = 1e3
     n_iters= 10000
@@ -302,57 +303,7 @@ if __name__ == '__main__':
             sender_alphas = torch.load(fname)
         else:
             raise FileNotFoundError
-    final_acc, linear_entropy, linear_entropy_input_var, acc_var = acc_schedule.analyze_schedule(sender_alphas)
-    
-    diff_betas = acc_schedule.find_diff_beta()
-    diff_alphas = diff_betas - torch.cat([torch.tensor([0.]),diff_betas[:-1]])
-    diff_sch_final_acc, diff_sch_linear_entropy, diff_sch_input_var, diff_sch_acc_var = acc_schedule.analyze_schedule(diff_alphas)
-    # compare two schedules
-    fname2 = f'./cache_files/linear_entropy_alphas_s{n_steps}_{beta1/10}.pt'
-    sender_alphas2 = torch.load(fname2)
-    final_acc2, linear_entropy2, input_var2, acc_var2 = acc_schedule.analyze_schedule(sender_alphas2)
-    # plt.scatter(t, linear_entropy_input_var.cpu(), s=1, label=fname)
-    # plt.scatter(t, input_var2.cpu(), s=1, label=fname2)
-    # plt.legend()
-    # plt.savefig('./cache_files/input_var.png')
-    
-    # compare diffusion schedule and bfn schedule
-    plt.figure()
-    diff_input_var = acc_schedule.analyze_diff(n_steps=n_steps)
-    plt.scatter(t, diff_input_var, s=1, label='diffusion')
-    plt.scatter(t, linear_entropy_input_var.cpu(), s=1, label='bfn')
-    plt.legend()
-    plt.savefig('./cache_files/diff_vs_bfn_input_var.png')
 
-    # compare linear schedule and previous schedule
-    plt.figure(dpi=300)
-    _, add_entropy, add_input_var, _ = acc_schedule.analyze_schedule()
-    plt.scatter(t, add_input_var.cpu(),  label='t*beta1**t',s=1)
-    plt.scatter(t, linear_entropy_input_var.cpu(),  label=f'linear entropy {beta1}',s=1)
-    plt.scatter(t, input_var2.cpu(),  label=f'linear entropy {beta1/10}',s=1)
-    # plt.scatter(t, diff_input_var, label='diffusion',s=1)
-    plt.scatter(t, 1 - i1e(diff_betas)/i0e(diff_betas), label='diff_sch',s=1)
-    plt.legend()
-    plt.title(f'n_steps {n_steps} beta1 {beta1}')
-    plt.savefig('./cache_files/input_variance_comparison.png')
-    
-    # plot the variance of log alpha
-    plt.figure()
-    plt.scatter(t, acc_var.cpu(), s=1, label=fname)
-    # plt.scatter(t, acc_var2.cpu(), s=1, label=fname2)
-    plt.title('variance of log beta')
-    plt.legend()
-    plt.savefig('./cache_files/log_beta_var_comparison.png')
-
-    
-    # compare entropy
-    plt.figure()
-    gt_linear_entropy = acc_schedule.linear_entropy((t * n_steps).to(acc_schedule.device))
-    plt.plot(t, gt_linear_entropy.cpu(),label='ground truth linear entropy')
-    plt.scatter(t, linear_entropy.cpu(), s=1, label='approximated linear entropy')
-    plt.scatter(t, add_entropy.cpu(), s=1, label='previous schedule (t*beta**t) entropy')
-    plt.legend()
-    plt.savefig('./cache_files/entropy_comparison.png')
     
     
     

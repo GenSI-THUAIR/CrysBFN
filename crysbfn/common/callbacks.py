@@ -235,7 +235,7 @@ class EMACallback(pl.Callback):
         trainer: "pl.Trainer",
         pl_module: "pl.LightningModule",
         checkpoint: Dict[str, Any],
-        # callback_state: Dict[str, Any]
+        # callback_state: Dict[str, Any]  older pytorchlightning interface 
     ) -> None:
         if checkpoint is None:
         # if callback_state is None:

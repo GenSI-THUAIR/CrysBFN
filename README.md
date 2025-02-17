@@ -1,5 +1,8 @@
-## [ICLR 2025] A Periodic Bayesian Flow for Material Generation (CrysBFN) 
-This is the official implementation code for ICLR 2025  [\[paper\]](https://openreview.net/pdf?id=Lz0XW99tE0) 
+## [ICLR 2025 Spotlight] A Periodic Bayesian Flow for Material Generation (CrysBFN) 
+This is the official implementation code for ICLR 2025 Spotlight paper CrysBFN.
+
+[\[paper\]](arxiv.org/pdf/2502.02016) 
+[\[website\]](https://t.co/a4x4qlROH7)
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
@@ -46,6 +49,20 @@ bash scripts/csp_scripts/eval_mp20.sh
 ```
 ### Toy Example
 We provide toy examples with minimal components illustrating how BFNs work in `./toy_example`.
+
+## Citation
+If you find this repo or our paper useful, please cite our paper :\)
+```
+@misc{wu2025periodicbayesianflowmaterial,
+        title={A Periodic Bayesian Flow for Material Generation}, 
+        author={Hanlin Wu and Yuxuan Song and Jingjing Gong and Ziyao Cao and Yawen Ouyang and Jianbing Zhang and Hao Zhou and Wei-Ying Ma and Jingjing Liu},
+        year={2025},
+        eprint={2502.02016},
+        archivePrefix={arXiv},
+        primaryClass={cs.LG},
+        url={https://arxiv.org/abs/2502.02016}, 
+  }
+```
 
 ## Acknowledgement 
 The main structure of this repository is mainly based on [CDVAE](https://github.com/txie-93/cdvae). The environment configuration file is modified after environment.yml in [FlowMM](https://github.com/txie-93/cdvae).

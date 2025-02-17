@@ -151,7 +151,6 @@ def recons_batch_metrics(batch, z, model, ld_kwargs, num_evals,
         all_atom_types_stack = torch.cat(all_atom_types_stack, dim=2)
     input_data_batch = Batch.from_data_list(input_data_list)
 
-    # 转换为Crystal并计算评估指标    
     crys_array_list = get_crystals_list(
         frac_coords[0], atom_types[0], lengths[0], angles[0], num_atoms[0])
     true_crystal_array_list = get_crystals_list(

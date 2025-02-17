@@ -22,7 +22,6 @@ import warnings
 import multiprocess as mp
 mp.set_start_method('spawn', force=True)
 
-# 忽略UserWarning
 warnings.filterwarnings("ignore", category=UserWarning)
 hydra.utils.log.info("ignore UserWarnings")
 
@@ -140,7 +139,7 @@ def run(cfg: DictConfig) -> None:
             ckpt_epochs = np.array([int(ckpt.parts[-1].split('-')[-2].split('=')[1]) for ckpt in ckpts])
             ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
             hydra.utils.log.info(f"found checkpoint: {ckpt}")
-            # 找到当时的hparams.yaml并load
+            # find hparams.yaml and load
             hparam_path = list(hydra_dir.glob('*.yaml'))[0]
             cfg = OmegaConf.load(hparam_path)
             hydra.utils.log.info(f"load hparams.yaml: {hparam_path}")

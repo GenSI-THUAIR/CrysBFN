@@ -57,7 +57,6 @@ def load_config(model_path):
 
 
 def load_model(model_path, load_data=False, testing=True):
-    # 这里有点槽点，这里应该是model_dir而不是model_path，所以应该传文件夹的名字
     with initialize_config_dir(str(model_path)):
         cfg = compose(config_name='hparams')
         model = hydra.utils.instantiate(
@@ -289,25 +288,5 @@ def compute_cov(crys, gt_crys,
 
     return metrics_dict, combined_dist_dict
 
-
-
-
-# sample output
-# OrderedDict([('name', None), ('graph_hash', 'b1714d9f35c31fdd410ae69c1a7d562c'),
-#               ('undecorated_graph_hash', '013b93c92d9123d1468197a34600ecc8'), 
-#               ('decorated_scaffold_hash', 'f734d40d6546caab71a09b9a3c074310'), 
-#               ('undecorated_scaffold_hash', '89622bd552c47f2d0c404b28cb597c44'),
-#                 ('symmetry_hash', '6WutHGnoMcPEVx14p5/DmBZTKlW0awxB32de/IN649U=2'), 
-#                 ('formula', 'Cd2 H38 C42 S2 N6 O12'), ('path', None),
-#                   ('density', 1.750718877734307), ('has_carbon', True), 
-#                   ('has_hydrogen', True), ('has_atomic_overlaps', False), 
-#                   ('has_overcoordinated_c', False), ('has_overcoordinated_n', False), 
-#                   ('has_overcoordinated_h', False), ('has_undercoordinated_c', False), 
-#                   ('has_undercoordinated_n', False), ('has_undercoordinated_rare_earth', False),
-#                     ('has_metal', True), ('has_lone_molecule', False), ('has_high_charges', False),
-#                       ('is_porous', None), ('has_suspicicious_terminal_oxo', False), 
-#                       ('has_undercoordinated_alkali_alkaline', False), 
-#                       ('has_geometrically_exposed_metal', False), (
-#                           'has_3d_connected_graph', False)])
 
 
