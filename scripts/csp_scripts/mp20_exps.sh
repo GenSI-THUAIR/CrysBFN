@@ -12,7 +12,7 @@ EMA_STR=ema${EMA_DECAY}
 SIM_FLOW=true
 DATASET=mp_20
 
-EXP_STEPS=(50)
+EXP_STEPS=(1000)
 GPU_ID_LIST=(0)
 
 for ((index = 0; index < ${#GPU_ID_LIST[@]}; index++))

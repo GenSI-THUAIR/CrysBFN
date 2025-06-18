@@ -194,7 +194,7 @@ class CrysBFN_CSP_PL_Model(BaseModule):
 
         return log_dict, loss
 
-@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="csp")
+@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="csp",version_base="1.1")
 def main(cfg: omegaconf.DictConfig):
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(
         cfg.data.datamodule, _recursive_=False

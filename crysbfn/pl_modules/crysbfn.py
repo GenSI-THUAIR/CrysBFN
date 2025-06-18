@@ -68,23 +68,6 @@ class CrysBFN(bfnBase):
         self.cond_acc = cond_acc
         
         self.sch_type = sch_type
-        # if sch_type == 'linear':
-        #     acc_schedule = AccuracySchedule(
-        #         n_steps=self.dtime_loss_steps, beta1=self.beta1_coord, device=self.device)
-        #     self.beta_schedule = acc_schedule.find_beta()
-        #     self.beta_schedule = torch.tensor(
-        #                             [0.] + self.beta_schedule.cpu().numpy().tolist()).to(self.device)
-        #     acc_sch = self.alpha_wrt_index(torch.arange(1, dtime_loss_steps+1).to(device).unsqueeze(-1),
-        #                               dtime_loss_steps, beta1_coord, sch_type='linear').squeeze(-1)
-        #     self.acc_diff_mean = acc_schedule.analyze_acc_diff(acc_sch)
-        # elif sch_type == 'exp':
-        #     acc_schedule = AccuracySchedule(
-        #         n_steps=self.dtime_loss_steps, beta1=self.beta1_coord, device=self.device)
-        #     self.beta_schedule = acc_schedule.find_diff_beta()
-        #     self.beta_schedule = torch.tensor(
-        #                             [0.] + self.beta_schedule.cpu().numpy().tolist()).to(self.device)
-        # else:
-        #     raise NotImplementedError
         
         alphas = self.alpha_wrt_index(torch.arange(1, dtime_loss_steps+1).to(device).unsqueeze(-1),
                                       dtime_loss_steps, beta1_coord).squeeze(-1)
@@ -503,7 +486,7 @@ class CrysBFN(bfnBase):
             return k_final, ret_coord_pred, ret_lattice_pred, traj
         return k_final, ret_coord_pred, ret_lattice_pred
     
-@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default")
+@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default",version_base="1.1")
 def main(cfg: omegaconf.DictConfig):
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(
         cfg.data.datamodule, _recursive_=False

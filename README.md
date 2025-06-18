@@ -19,15 +19,23 @@ And here is the visualization of the unified BFN generation framework
 ## Install
 ### 1. Set up environment variables
 Firstly please set up dot environment variables in .env file.
-- `PROJECT_ROOT`: path to the folder that contains this repo
-- `HYDRA_JOBS`: path to a folder to store hydra outputs
-- `WABDB`: path to a folder to store wabdb outputs
+- `PROJECT_ROOT`: path to the folder that contains this repo. e.g. /data/wuhl/CrysBFN
+- `HYDRA_JOBS`: path to a folder to store hydra outputs. This is the directory where we store checkpoints. e.g. /data/wuhl/CrysBFN/hydra
+- `WABDB`: path to a folder to store wabdb outputs e.g. /data/wuhl/CrysBFN/wandb
 
 ### 2. Install with Mamba
-We recommend using [Mamba](https://github.com/conda-forge/miniforge) or conda (with libmamba solver) to build the python environment. 
+We recommend using [Mamba](https://github.com/conda-forge/miniforge) or conda (with libmamba solver) to build the python environment. It may take several minutes to solve the environment—please wait patiently.
 ```
 conda env create -f environment.yml
 conda activate crysbfn
+```
+You possibly need swanlab to log trainig curves in China.
+If you can use wandb, please remove the first four lines in `crysbfn/run.py` and modify the wandb mode from 'offline' to 'online' in `conf/logging/default.yaml`
+```
+# import swanlab
+# swanlab.sync_wandb()
+# import os
+# os.environ["WANDB_MODE"] = "offline"  
 ```
 
 ## Training, Sampling and Evaluation
@@ -38,9 +46,10 @@ For launching a de novo generation task training experiment, please use the foll
 ```
 bash ./scripts/gen_scripts/mp20_exps.sh
 ```
+Every first run on each dataset requires longer time (< 1 hour) for preparing the cache processed data.
 For launching a crystal structure prediction task training experiment, please use the following code:
 ```
-bash ./scripts/gen_scripts/mp20_exps.sh
+bash ./scripts/csp_scripts/mp20_exps.sh
 ```
 ### Sampling and Evaluating
 After training, please modify the MODEL_PATH variable as the hydra directory of the training experiment. Then, use the below code to generate and evaluating samples.

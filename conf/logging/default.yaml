@@ -18,7 +18,7 @@ wandb:
   project: crystalbfn
   entity: null
   log_model: True
-  mode: 'online'
+  mode: 'offline' 
   group: ${expname}
 
 

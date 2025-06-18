@@ -2,9 +2,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from torch import nn
-os.chdir('/sharefs/material/crysbfn')
+
 from crysbfn.common.von_mises_utils import VonMisesHelper
-# print(os.getcwd())
 
 import torch
 from tqdm import tqdm

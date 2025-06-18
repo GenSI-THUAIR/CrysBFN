@@ -1,3 +1,9 @@
+# if you are in China and wandb can not be used, please use the following code to use swanlab
+import swanlab
+swanlab.sync_wandb()
+import os
+os.environ["WANDB_MODE"] = "offline"  
+
 from pathlib import Path
 from typing import List
 
