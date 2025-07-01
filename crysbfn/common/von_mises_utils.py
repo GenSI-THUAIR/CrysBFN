@@ -4,7 +4,6 @@ from torch.distributions.von_mises import _log_modified_bessel_fn as log_bessel_
 from torch.special import i0e, i1e
 import torch
 import numpy as np
-# import ray
 import crysbfn
     
 class VonMisesHelper:

@@ -29,14 +29,6 @@ We recommend using [Mamba](https://github.com/conda-forge/miniforge) or conda (w
 conda env create -f environment.yml
 conda activate crysbfn
 ```
-You possibly need swanlab to log trainig curves in China.
-If you can use wandb, please remove the first four lines in `crysbfn/run.py` and modify the wandb mode from 'offline' to 'online' in `conf/logging/default.yaml`
-```
-# import swanlab
-# swanlab.sync_wandb()
-# import os
-# os.environ["WANDB_MODE"] = "offline"  
-```
 
 ## Training, Sampling and Evaluation
 We use shell scripts in `scripts` to manage all pipelines. Hyper-parameters can be set in those shell script files. Scripts to launch experiments can be found in `scripts/csp_scripts` and `scripts/gen_scripts` for crystal structure prediction task and de novo generation task.

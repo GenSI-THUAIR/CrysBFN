@@ -127,7 +127,7 @@ class CrysBFN_CSP_PL_Model(BaseModule):
         lattices = lattices * self.hparams.data.lattice_std + self.hparams.data.lattice_mean
         lengths, angles = lattices_to_params_shape(torch.tensor(lattices))
         output_dict = {'num_atoms': num_atoms, 'lengths': lengths, 'angles': angles,
-                       'frac_coords': frac_coords, 'atom_types': batch.atom_types.to(self.device), 'traj': traj if get_rej else None,
+                       'frac_coords': frac_coords, 'atom_types': batch.atom_types.to(self.device), 
                        'is_traj': False, 'segment_ids': segment_ids}
         return output_dict
 

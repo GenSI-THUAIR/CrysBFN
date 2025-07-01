@@ -107,11 +107,6 @@ def main(args):
     #     ('opt' in args.tasks and args.start_from == 'data'))
     model, test_loader, cfg = load_model(
         model_path, load_data=True)
-    ld_kwargs = SimpleNamespace(n_step_each=args.n_step_each,
-                                step_lr=args.step_lr,
-                                min_sigma=args.min_sigma,
-                                save_traj=args.save_traj,
-                                disable_bar=args.disable_bar)
 
     if torch.cuda.is_available():
         model.to('cuda')

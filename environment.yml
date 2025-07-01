@@ -72,7 +72,6 @@ dependencies:
     - matminer
     - func_timeout
     - absl-py
-    - swanlab
     - -e .
     # from here below, we use find-links
     - --find-links https://data.pyg.org/whl/torch-2.1.0+cu118.html
