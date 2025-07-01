@@ -86,11 +86,7 @@ chemical_symbols = [
     'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn', 'Nh', 'Fl', 'Mc',
     'Lv', 'Ts', 'Og']
 
-
-# CrystalNN = local_env.CrystalNN(distance_cutoffs=None, x_diff_weight=-1, porous_adjustment=False)
 CrystalNN = local_env.CrystalNN(distance_cutoffs=None,  porous_adjustment=True)
-# CrystalNN = local_env.MinimumDistanceNN(cutoff=5.0, tol=2.5)
-# TODO: 这里需要investigate一下对于qmof是否需要设置porous_adjustment = True
 
 def build_crystal(crystal_str, niggli=True, primitive=False):
     """Build crystal from cif string."""
@@ -118,12 +114,12 @@ def build_crystal_graph(crystal, graph_method='crystalnn'):
     """
     if graph_method == 'crystalnn':
         from pymatgen.analysis.graphs import StructureGraph
-        crystal_graph = StructureGraph.with_local_env_strategy(crystal, CrystalNN)
+        crystal_graph = StructureGraph.from_local_env_strategy(crystal, CrystalNN)
     elif graph_method == 'none':
         pass
     elif graph_method == 'minimum_distance':
         from pymatgen.analysis.graphs import StructureGraph
-        crystal_graph = StructureGraph.with_local_env_strategy(crystal, local_env.MinimumDistanceNN(cutoff=30,tol=0.3))
+        crystal_graph = StructureGraph.from_local_env_strategy(crystal, local_env.MinimumDistanceNN(cutoff=30,tol=0.3))
     else:    
         raise NotImplementedError
 
@@ -693,7 +689,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
     dir = os.path.dirname(input_file)
     fname_w_extension = os.path.basename(input_file)
     fname_wo_extension, _ = os.path.splitext(fname_w_extension)
-    # 保存在同一目录下
+    # save in the same folder
     preprocess_data_path = os.path.join(dir,f'preprocess_data_{fname_wo_extension}_{len(df)}.pt')
     if os.path.exists(preprocess_data_path):
         logger.info(f'Loading preprocessed cached data from {preprocess_data_path}')
@@ -717,20 +713,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         }
         result_dict.update(properties)
         return result_dict
-    # 这里改一下，因为一部分的数据会报错
-    # num_workers = 1
-    # if num_workers == 1:
-    #     print('Single worker start preprocess')
-    #     unordered_results = map(
-    #     process_one,
-    #     [df.iloc[idx] for idx in range(len(df))],
-    #     [niggli] * len(df),
-    #     [primitive] * len(df),
-    #     [graph_method] * len(df),
-    #     [prop_list] * len(df),
-    #     )
-    #     print("Done!")
-    # else:
+
     print("num workers:",num_workers, " waiting...")
     unordered_results = p_umap(
     process_one,
@@ -745,18 +728,18 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
 
     all_num = len(df)
     success_num = len(mpid_to_results.keys())
-    logger.info(f'总共共有{success_num/all_num*100:.3f}%的数据处理成功')
+    logger.info(f'{success_num/all_num*100:.3f}% of crystals are successfully processed!')
 
     ordered_results = [mpid_to_results[df.iloc[idx]['material_id']]
                         for idx in range(len(df))
                             if df.iloc[idx]['material_id'] in mpid_to_results.keys()]
-    # 保存预处理结果的数据
+    # save the preprocessed results
     torch.save(ordered_results, preprocess_data_path)
     return ordered_results
 
 
 def preprocess_tensors(crystal_array_list, niggli, primitive, graph_method, input_file=None):
-    # # 保存在同一目录下
+    # save in the same folder
     # preprocess_data_path = os.path.join(input_file,f'preprocess_prop_data.pt')
     # if os.path.exists(preprocess_data_path):
     #     logger.info(f'Loading preprocessed cached data from {preprocess_data_path}')
@@ -792,8 +775,6 @@ def preprocess_tensors(crystal_array_list, niggli, primitive, graph_method, inpu
     )
     ordered_results = list(
         sorted(unordered_results, key=lambda x: x['batch_idx']))
-    # 保存预处理结果的数据
-    # torch.save(ordered_results, preprocess_data_path)
     return ordered_results
 
 
@@ -944,7 +925,7 @@ import matplotlib.pyplot as plt
 CrystalNNFP = CrystalNNFingerprint.from_preset("ops")
 CompFP = ElementProperty.from_preset('magpie')
 import pymatgen as pmg
-import ray
+# import ray
 
 class Crystal(object):
     def __init__(self, crys_array_dict, run_func_timeout=1800, species_tolerence=100, check_comp=True):
@@ -955,14 +936,15 @@ class Crystal(object):
         self.dict = crys_array_dict
 
         self.run_func_timeout = run_func_timeout
-        self.species_tolerence = species_tolerence # mp_20里每个晶体最多有7种元素
-        self.check_comp = check_comp
-        # 如果构建晶体超过120s，就认为构建失败
+        self.species_tolerence = species_tolerence # the tolerance of number of unique elements to avoid too long time to do validity check
+        self.check_comp = check_comp # whether to check the compositional validity
+        
         self.get_structure()
         self.get_composition()
         self.get_validity()
         self.get_fingerprints()
 
+    # function to avoid too long time running check
     def run_function(self, func, *args, **kwargs):
         try:
             res = func_timeout(self.run_func_timeout, func, args=args, kwargs=kwargs)
@@ -1044,7 +1026,6 @@ class Crystal(object):
             plt.figure()
             ax = plot_atoms(ase_atoms, rotation=('45x,45y,0z'),radii=0.3)
             fig = ax.get_figure()
-            # fig.savefig('/sharefs/material/crysbfn/running_vis.png')
             plt.close()
             return fig
         else:
@@ -1068,7 +1049,7 @@ class SinusoidalTimeEmbeddings(nn.Module):
 
 def back2interval(x, interval='-pi+pi'):
     '''
-    默认使用 [-pi, pi) 作为周期
+    use [-pi, pi) as the default periodic interval
     '''
     if interval == '-pi+pi':
         x = x - 2. * torch.pi * torch.round(x / (2. * torch.pi))
@@ -1081,6 +1062,7 @@ def back2interval(x, interval='-pi+pi'):
 import io
 import ase
 from ase.visualize.plot import plot_atoms
+
 # from ase
 def vis_crystal(crys:Crystal):
     structure = crys.get_structure()
@@ -1092,12 +1074,12 @@ def vis_crystal(crys:Crystal):
 from multiprocessing import set_start_method, get_context
 set_start_method("spawn")
 
-@ray.remote
-def ray_crys_map(x, disc=None):
-    import warnings
-    # print(disc if disc is not None else disc)
-    warnings.filterwarnings('ignore', category=UserWarning, module='pymatgen.analysis.local_env')
-    return Crystal(x, species_tolerence=8)
+# @ray.remote
+# def ray_crys_map(x, disc=None):
+#     import warnings
+#     # print(disc if disc is not None else disc)
+#     warnings.filterwarnings('ignore', category=UserWarning, module='pymatgen.analysis.local_env')
+#     return Crystal(x, species_tolerence=8)
 
 def lattices_to_params_shape(lattices):
     lengths = torch.sqrt(torch.sum(lattices ** 2, dim=-1))
@@ -1159,7 +1141,7 @@ class PeriodHelper:
     @staticmethod
     def circle2any(pos, T_min, T_max):
         '''
-        [-pi, pi] -> [T_min, T_max)
+        [-pi, pi) -> [T_min, T_max)
         '''
         assert not torch.isnan(pos).any(), f"pos: {pos}"
         assert torch.all(pos >= -np.pi) and torch.all(pos <= np.pi)
@@ -1189,7 +1171,7 @@ class PeriodHelper:
     @staticmethod
     def circle2frac(pos):
         '''
-        [-pi, pi] -> [0,1]
+        [-pi, pi) -> [0,1]
         '''
         assert torch.all(pos >= -np.pi) and torch.all(pos < np.pi)
         # frac = PeriodHelper.any2frac(pos, -np.pi, np.pi)

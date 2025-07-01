@@ -28,7 +28,7 @@ early_stopping:
   patience: ${data.early_stopping_patience} 
   verbose: False
 
-resume: true
+resume: false
 
 model_checkpoints:
   save_top_k: 1

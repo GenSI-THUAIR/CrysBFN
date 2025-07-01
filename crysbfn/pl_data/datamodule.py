@@ -60,15 +60,15 @@ class CrystDataModule(pl.LightningDataModule):
     def get_scaler(self, scaler_path):
         # Load once to compute property scaler
         if scaler_path is None:
-            train_dataset = hydra.utils.instantiate(self.datasets.train)
+            self.train_dataset = hydra.utils.instantiate(self.datasets.train)
             self.lattice_scaler = get_scaler_from_data_list(
-                train_dataset.cached_data,
+                self.train_dataset.cached_data,
                 key='scaled_lattice')
             self.scaler = get_scaler_from_data_list(
-                train_dataset.cached_data,
-                key=train_dataset.prop)
+                self.train_dataset.cached_data,
+                key=self.train_dataset.prop)
             self.cart_scaler = get_scaler_from_data_list(
-                train_dataset.cached_data,
+                self.train_dataset.cached_data,
                 key='cart_coords')
             
         else:
@@ -85,7 +85,8 @@ class CrystDataModule(pl.LightningDataModule):
         construct datasets and assign data scalers.
         """
         if stage is None or stage == "fit":
-            self.train_dataset = hydra.utils.instantiate(self.datasets.train)
+            # already instantiated in get_scaler
+            # self.train_dataset = hydra.utils.instantiate(self.datasets.train)
             self.val_datasets = [
                 hydra.utils.instantiate(dataset_cfg)
                 for dataset_cfg in self.datasets.val
@@ -162,7 +163,7 @@ class CrystDataModule(pl.LightningDataModule):
         )
 
 
-@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default")
+@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default",version_base="1.1")
 def main(cfg: omegaconf.DictConfig):
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(
         cfg.data.datamodule, _recursive_=False

@@ -21,7 +21,9 @@ from crysbfn.pl_modules.base_model import build_mlp
 import scipy.stats as stats
 from crysbfn.common.linear_acc_search import AccuracySchedule
 import matplotlib.pyplot as plt
+import os
 from torch.distributions import VonMises
+from crysbfn.common.von_mises_fisher_cache import VonMisesFisherCache
 
 class CrysBFN_CSP(bfnBase):
     def __init__(
@@ -39,7 +41,7 @@ class CrysBFN_CSP(bfnBase):
         pred_mean = True,
         end_back=False,
         cond_acc = False,
-        sch_type='exp',
+        sch_type='linear',
         sim_cir_flow= True,
         **kwargs
     ):
@@ -70,25 +72,6 @@ class CrysBFN_CSP(bfnBase):
         self.cond_acc = cond_acc
         
         self.sch_type = sch_type
-        # if sch_type == 'linear':
-        #     acc_schedule = AccuracySchedule(
-        #         n_steps=self.dtime_loss_steps, beta1=self.beta1_coord, device=self.device)
-        #     self.beta_schedule = acc_schedule.find_beta()
-        #     self.beta_schedule = torch.tensor(
-        #                             [0.] + self.beta_schedule.cpu().numpy().tolist()).to(self.device)
-        #     acc_sch = self.alpha_wrt_index(torch.arange(1, dtime_loss_steps+1).to(device).unsqueeze(-1),
-        #                               dtime_loss_steps, beta1_coord, sch_type='linear').squeeze(-1)
-        #     self.acc_diff_mean = acc_schedule.analyze_acc_diff(acc_sch)
-        # elif sch_type == 'exp':
-        #     acc_schedule = AccuracySchedule(
-        #         n_steps=self.dtime_loss_steps, beta1=self.beta1_coord, device=self.device)
-        #     self.beta_schedule = acc_schedule.find_diff_beta()
-        #     self.beta_schedule = torch.tensor(
-        #                             [0.] + self.beta_schedule.cpu().numpy().tolist()).to(self.device)
-        # elif sch_type == 'add':
-        #     steps = torch.range(0,self.dtime_loss_steps,1, device=self.device)
-        #     t = steps / self.dtime_loss_steps
-        #     self.beta_schedule = t * self.beta1_coord** t
         
         alphas = self.alpha_wrt_index(torch.arange(1, dtime_loss_steps+1).to(device).unsqueeze(-1),
                                       dtime_loss_steps, beta1_coord).squeeze(-1)
@@ -98,11 +81,9 @@ class CrysBFN_CSP(bfnBase):
         self.vm_helper:VonMisesHelper = VonMisesHelper(cache_sampling=False,
                                                       device=self.device,
                                                       sample_alphas=alphas,
-                                                      num_vars=hparams.data.max_atoms*hparams.data.datamodule.batch_size.train*3,
                                                       )
         self.epsilon = torch.tensor(1e-7)
         self.norm_beta = False if not 'norm_beta' in self.hparams.keys() else hparams.norm_beta
-        self.rej_samp = False if not 'rej_samp' in self.hparams.keys() else hparams.rej_samp
     
     def circular_var_bayesian_update(self, m, c, y, alpha):
         '''
@@ -151,23 +132,9 @@ class CrysBFN_CSP(bfnBase):
             return logbeta
         return logbeta * (torch.log(self.beta1_coord) - torch.log(self.epsilon)) + torch.log(self.epsilon)
     
-    def circular_var_bayesian_flow(self, x, t, beta_t):
-        '''
-        Compute p(θ|x, t) = E_{vM(y|x,β(t))}δ(θ-h(θ, y, β(t)))
-        the returned variable is in [-pi, pi)
-        :param x: the input circular variable, shape (BxN, 3 or 1)
-        :param t: time , shape (BxN,)
-        :param beta_t: the concentration of the von Mises distribution, shape (BxN, 3 or 1)
-        return: mu: the mean of the posterior, shape (BxN, 3 or 1)
-                kappa: the concentration of the posterior, shape (BxN, 3 or 1)
-        '''
-        y = self.vm_helper.sample(loc=x, concentration=beta_t, n_samples=1)
-        return y.detach().clone()
-    
     @torch.no_grad()
-    def circular_var_bayesian_flow_sim(self, x, t_index, beta1, n_samples=1, epsilon=1e-7):
+    def circular_var_bayesian_flow_sim(self, x, t_index, beta1, n_samples=1, epsilon=1e-7, cache_sampling=False, cache_size=100000,cache_dir='./cache_files/vm_cache'):
         '''
-        Compute p(θ|x, t) = E_{vM(y|x,β(t))}δ(θ-h(θ, y, β(t)))
         the returned variable is in [-pi, pi)
         :param x: the input circular variable, shape (BxN, 3 or 1)
         :param t: time , shape (BxN,)
@@ -179,7 +146,21 @@ class CrysBFN_CSP(bfnBase):
         alpha_index = self.alpha_wrt_index(torch.arange(1, self.dtime_loss_steps+1).to(self.device).unsqueeze(-1).long(), self.dtime_loss_steps, beta1).squeeze(-1)
         alpha = alpha_index.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat(1,x.shape[0],x.shape[1],n_samples)
         # y = self.vm_helper.sample_cache(loc=x)
-        y = self.vm_helper.sample(loc=x.unsqueeze(0).unsqueeze(-1).repeat(alpha.shape[0],1,1,n_samples), concentration=alpha, n_samples=1)
+
+        if cache_sampling:
+            cache_vm = VonMisesFisherCache(alpha_schedule=alpha_index, 
+                                            beta1=beta1, p=2, cache_size=cache_size, 
+                                            cache_dir=os.path.join(PROJECT_ROOT,cache_dir), 
+                                            overwrite_cache=False)
+            all_t_index = torch.arange(1, self.dtime_loss_steps+1).to(self.device).long()
+            all_t_index = all_t_index.view(-1,1,1).repeat(1, x.shape[0], x.shape[1])
+            # sample_t_index = sample_t_index.view(-1,1,1).expand_as(x[...,0])
+            # sample_t_index = t_index.unsqueeze(-1).repeat(1, 3)
+            vec_x = torch.stack([x.sin(), x.cos()], dim=-1)  # convert to vector
+            vec_y = cache_vm.sample(loc=vec_x, t_index=all_t_index)
+            y = torch.atan2(vec_y[...,0], vec_y[...,1]).unsqueeze(-1)  # convert to angle
+        else:  
+            y = self.vm_helper.sample(loc=x.unsqueeze(0).unsqueeze(-1).repeat(alpha.shape[0],1,1,n_samples), concentration=alpha, n_samples=1)
         # sample prior
         prior_mu = (2*torch.pi*torch.rand((1,x.shape[0],x.shape[1]))-torch.pi).to(self.device)
         prior_cos, prior_sin = prior_mu.cos(), prior_mu.sin()
@@ -201,9 +182,8 @@ class CrysBFN_CSP(bfnBase):
         return poster_mu.detach(), poster_kappa.detach()
     
     @torch.no_grad()
-    def circular_var_bayesian_flow_sim_sample(self, x, t_index, beta1, n_samples=1, epsilon=1e-7):
+    def circular_var_bayesian_flow_sim_sample(self, x, t_index, beta1, n_samples=1, epsilon=1e-7, cache_sampling=False, cache_size=100000,cache_dir='cache_files/vm_cache'):
         '''
-        Compute p(θ|x, t) = E_{vM(y|x,β(t))}δ(θ-h(θ, y, β(t)))
         the returned variable is in [-pi, pi)
         :param x: the input circular variable, shape (BxN, 3 or 1)
         :param t: time , shape (BxN,)
@@ -211,7 +191,7 @@ class CrysBFN_CSP(bfnBase):
         return: mu: the mean of the posterior, shape (BxN, 3 or 1)
                 kappa: the concentration of the posterior, shape (BxN, 3 or 1)
         '''
-        # assert 所有的 t_index 都是相同的
+        # assert all the t_index are identical
         assert (t_index == t_index[0]).all(), 't_index should be the same'
         idx = int(t_index[0].cpu())
         if idx == 1:
@@ -221,8 +201,21 @@ class CrysBFN_CSP(bfnBase):
         alpha_index = self.alpha_wrt_index(torch.arange(1, idx).to(self.device).long(), 
                                            self.dtime_loss_steps, beta1)
         alpha = alpha_index.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat(1,x.shape[0],x.shape[1],n_samples) # (idx-1, n_atoms, 3, n_samples)
-        y = self.vm_helper.sample(loc=x.unsqueeze(0).unsqueeze(-1).repeat(alpha.shape[0],1,1,n_samples), 
-                                  concentration=alpha, n_samples=1)
+        if cache_sampling:
+            cache_vm = VonMisesFisherCache(alpha_schedule=alpha_index, 
+                                            beta1=beta1, p=2, cache_size=cache_size, 
+                                            cache_dir=os.path.join(PROJECT_ROOT,cache_dir), 
+                                            overwrite_cache=False)
+            all_t_index = torch.arange(1, self.dtime_loss_steps+1).to(self.device).long()
+            all_t_index = all_t_index.view(-1,1,1).repeat(1, x.shape[0], x.shape[1])
+            # sample_t_index = sample_t_index.view(-1,1,1).expand_as(x[...,0])
+            # sample_t_index = t_index.unsqueeze(-1).repeat(1, 3)
+            vec_x = torch.stack([x.sin(), x.cos()], dim=-1)  # convert to vector
+            vec_y = cache_vm.sample(loc=vec_x, t_index=all_t_index)
+            y = torch.atan2(vec_y[...,0], vec_y[...,1]).unsqueeze(-1)  # convert to angle
+        else:  
+            y = self.vm_helper.sample(loc=x.unsqueeze(0).unsqueeze(-1).repeat(alpha.shape[0],1,1,n_samples), 
+                                    concentration=alpha, n_samples=1)
         # sample posterior
         poster_cos_cum, poster_sin_cum = (alpha * y.cos()).cumsum(dim=0).mean(-1), (alpha * y.sin()).cumsum(dim=0).mean(-1)
         # poster_cos_cum, poster_sin_cum = (alpha * y.cos()).cumsum(dim=1), (alpha * y.sin()).cumsum(dim=1)
@@ -234,9 +227,6 @@ class CrysBFN_CSP(bfnBase):
         return poster_mu.detach(), poster_kappa.detach()
 
     def back2interval(self, x):
-        '''
-        默认使用 [-pi, pi) 作为周期
-        '''
         return back2interval(x)
     
     def interdependency_modeling(
@@ -299,19 +289,15 @@ class CrysBFN_CSP(bfnBase):
         t_per_mol = t_per_mol.unsqueeze(-1)
         # Bayesian flow for every modality to obtain input params
         # atom coord bayesian flow
-        # [0,1) -> [T_min, T_max) 把frac_coords转为自定义的[T_min, T_max)比如fractional coordinate [0,1)
+        # [0,1) -> [T_min, T_max)
         pos = p_helper.frac2any(frac_coords % 1, self.T_min, self.T_max)
         # for anything related to Bayesian update, we need to transform to [-pi, pi)
-        if self.hparams.BFN.sim_cir_flow:
-            # time_start = time.time()
-            cir_mu_pos_t, log_acc = self.circular_var_bayesian_flow_sim(
-                                                x=p_helper.frac2circle(frac_coords%1), 
-                                                t_index=t_index.repeat_interleave(num_atoms, dim=0), 
-                                                beta1=self.beta1_coord,
-                                                n_samples=int(self.hparams.n_samples)
-                                                )
-            # time_end = time.time()
-            # print(f'torch_sample_time {time_end-time_start:.6f}s')
+        cir_mu_pos_t, log_acc = self.circular_var_bayesian_flow_sim(
+                                            x=p_helper.frac2circle(frac_coords%1), 
+                                            t_index=t_index.repeat_interleave(num_atoms, dim=0), 
+                                            beta1=self.beta1_coord,
+                                            n_samples=int(self.hparams.n_samples)
+                                            )
 
         mu_pos_t = p_helper.circle2any(cir_mu_pos_t, self.T_min, self.T_max)
         # lattice bayesian flow
@@ -321,7 +307,7 @@ class CrysBFN_CSP(bfnBase):
         mu_lattices_t, gamma_lattices = self.continuous_var_bayesian_flow(
                                             x=lattices, t=t_per_mol, 
                                             sigma1=self.sigma1_lattice)
-        # reshape 为 (BxN, 3, 3)
+        # reshape as (BxN, 3, 3)
         mu_lattices_t_33 = mu_lattices_t.reshape(-1, 3, 3)
         # coord pred is in [T_min, T_max)
         coord_pred, lattice_pred = self.interdependency_modeling(
@@ -364,14 +350,14 @@ class CrysBFN_CSP(bfnBase):
     @torch.no_grad()
     def init_params(self, num_atoms, segment_ids, batch, samp_acc_factor, start_idx, method = 'train'):
         if method == 'rand':
-            # 随机初始化
+            # randomized init
             num_batch_atoms = num_atoms.sum()
             num_molecules = num_atoms.shape[0]
             # mu_pos_t = torch.zeros((num_batch_atoms, 3)).to(self.device)  # [N, 3] circular coordinates prior
             mu_pos_t = 2*np.pi*torch.rand((num_batch_atoms, 3)).to(self.device) - np.pi # [N, 3] circular coordinates prior
             mu_pos_t = p_helper.circle2any(mu_pos_t, self.T_min, self.T_max) # transform to [T_min, T_max)
             theta_type_t = torch.ones((num_batch_atoms, self.K)).to(self.device) / self.K  # [N, K] discrete prior
-            # 把lattice视为9个连续变量
+            # consider lattice as 9 continuous variable
             mu_lattices_t = torch.zeros((num_molecules, 3, 3)).view(-1,9).to(self.device)  # [N, 9] continous lattice prior
             log_acc = self.norm_logbeta(
                             torch.log(torch.tensor((self.epsilon))) * torch.ones_like(mu_pos_t))
@@ -382,7 +368,7 @@ class CrysBFN_CSP(bfnBase):
 
     def update_params(self, i, sample_steps, coord_pred, lattice_pred, mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms, strategy='end_back'):
         num_molecules = lattice_pred.shape[0]
-        if strategy == 'end_back':
+        if strategy == 'end_back': # sample trick used in MolCRAFT https://arxiv.org/abs/2404.12141
             if i + 1 > sample_steps:
                 return mu_pos_t, log_acc, mu_lattices_t, rho_lattice
             t_index = i * torch.ones((num_molecules, )).to(self.device)
@@ -391,7 +377,7 @@ class CrysBFN_CSP(bfnBase):
             tplus1_per_mol = (t_cts + 1 / sample_steps).clamp(0, 1)
             tplus1_index_per_atom = t_index_per_atom + 1
             cir_x = p_helper.any2circle(coord_pred, self.T_min, self.T_max)
-            cir_mu_pos_t, log_acc = self.circular_var_bayesian_flow_sim_sample(
+            cir_mu_pos_t, log_acc = self.circular_var_bayesian_flow_sim(
                 x=cir_x,
                 t_index=tplus1_index_per_atom.squeeze(-1),
                 beta1=self.beta1_coord,
@@ -452,12 +438,9 @@ class CrysBFN_CSP(bfnBase):
         if 'n_samples' in self.hparams.keys():
             samp_acc_factor = int(self.hparams.n_samples) if int(samp_acc_factor) == 1 else samp_acc_factor
         
-        rand_back = False
-        back_sampling = False if 'back_sampling' not in kwargs.keys() else kwargs['back_sampling']
         sample_passes = 1
         
-        print(f"Sampling with low noise with factor, {samp_acc_factor}, perform rejection sampling. {self.rej_samp}, ",
-                        f"sample_passes {sample_passes}, rand_back {rand_back}, strategy {strategy} ")
+        print(f"sample_passes {sample_passes}, strategy {strategy} ")
         
         ret_coord_pred, ret_lattice_pred = None, None
         for sample_pass_idx in range(sample_passes):
@@ -493,15 +476,6 @@ class CrysBFN_CSP(bfnBase):
                     mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
                         self.update_params(i, sample_steps, coord_pred, lattice_pred, 
                                            mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms,'vanilla')
-                elif strategy == 'mix':
-                    if i < self.dtime_loss_steps * (2 / 3): # 600 for mp20
-                        mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
-                        self.update_params(i, sample_steps, coord_pred, lattice_pred, 
-                                           mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms, strategy='end_back')           
-                    else:
-                        mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
-                        self.update_params(i, sample_steps, coord_pred, lattice_pred, 
-                                           mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms,'vanilla')
                 else:
                     raise NotImplementedError
                 # add trajectory
@@ -525,7 +499,7 @@ class CrysBFN_CSP(bfnBase):
             return ret_coord_pred, ret_lattice_pred, traj
         return ret_coord_pred, ret_lattice_pred
     
-@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default")
+@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default",version_base="1.1")
 def main(cfg: omegaconf.DictConfig):
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(
         cfg.data.datamodule, _recursive_=False

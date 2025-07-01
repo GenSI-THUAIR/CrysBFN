@@ -228,3 +228,7 @@ fabric.properties
 .png
 
 .vscode/
+
+*.pt
+hydra/
+wandb/

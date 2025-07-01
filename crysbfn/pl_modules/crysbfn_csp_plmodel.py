@@ -55,7 +55,7 @@ class CrysBFN_CSP_PL_Model(BaseModule):
         
     def forward(self, batch):
         batch = batch.to(self.device)
-        # 按照self.atom_type_map把atom_type重新映射
+        # use the precomputed self.atom_type_map to map the atom_type as the internal atom type vocab index
         mapped_atom_types = torch.tensor([self.atom_type_map[atom_type.item()] 
                                             for atom_type in batch.atom_types], 
                                                 device=self.device)
@@ -102,7 +102,7 @@ class CrysBFN_CSP_PL_Model(BaseModule):
         segment_ids = sample_batch.batch.to(self.device)
         num_atoms = sample_batch.num_atoms.to(self.device)
         sample_steps = self.hparams.BFN.dtime_loss_steps if sample_steps is None else sample_steps
-        get_rej = False if 'return_traj' not in kwargs else kwargs['return_traj']
+        get_traj = False if 'return_traj' not in kwargs else kwargs['return_traj']
         sample_res = self.BFN.sample(
                 mapped_atom_types,
                 num_atoms,
@@ -114,25 +114,20 @@ class CrysBFN_CSP_PL_Model(BaseModule):
                 batch = batch,
                 **kwargs
             )
-        if get_rej:
+        if get_traj:
             coord_pred_final, lattice_pred_final, traj = sample_res
         else:
             coord_pred_final, lattice_pred_final = sample_res
         
-        # 把 [-pi, pi) 转为 [0, 1)
-        
+        # transform [-pi, pi) as [0, 1)
         frac_coords = p_helper.any2frac(coord_pred_final,eval(str(self.T_min)),eval(str(self.T_max)))
-        
         assert frac_coords.min() >= -1e-5 and frac_coords.max() < 1, f'frac_coords min {frac_coords.min()}, max {frac_coords.max()}'
-        # 处理lattices
-            
+        # process lattices
         lattices = lattice_pred_final.reshape(-1, 3, 3)
         lattices = lattices * self.hparams.data.lattice_std + self.hparams.data.lattice_mean
-        
         lengths, angles = lattices_to_params_shape(torch.tensor(lattices))
-        
         output_dict = {'num_atoms': num_atoms, 'lengths': lengths, 'angles': angles,
-                       'frac_coords': frac_coords, 'atom_types': batch.atom_types.to(self.device), 'traj': traj if get_rej else None,
+                       'frac_coords': frac_coords, 'atom_types': batch.atom_types.to(self.device), 
                        'is_traj': False, 'segment_ids': segment_ids}
         return output_dict
 
@@ -199,7 +194,7 @@ class CrysBFN_CSP_PL_Model(BaseModule):
 
         return log_dict, loss
 
-@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="csp")
+@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="csp",version_base="1.1")
 def main(cfg: omegaconf.DictConfig):
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(
         cfg.data.datamodule, _recursive_=False
