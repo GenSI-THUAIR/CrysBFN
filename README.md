@@ -51,16 +51,16 @@ bash scripts/csp_scripts/eval_mp20.sh
 ```
 
 ### Use Our Checkpoints
-We provide our checkpoints [here](https://drive.google.com/drive/folders/1W5kGiZYFRJZiyKyTwCdcPk9lbjTsTCO-?usp=drive_link). Here is an example to use the checkpoint:
+We provide our checkpoints [here](https://drive.google.com/drive/folders/1W5kGiZYFRJZiyKyTwCdcPk9lbjTsTCO-?usp=drive_link). Here is a fastest example (NFE=10) to use the checkpoint to verify your installation:
 
 1. Download the zip file into the hydra directory and unzip it
 ```
 cd hydra
-unzip ./mpts_csp_s500.zip
+unzip ./mp20_csp_s10.zip
 ```
-2. Modify the first line in `scripts/csp_scripts/mpts52_eval.sh`
+2. Modify the first line in `scripts/csp_scripts/mp20_eval.sh`
 ```
-MODEL_PATH=/data/wuhl/CrysBFN/hydra/mpts_csp_s500 # modify according to your path
+MODEL_PATH=/data/wuhl/CrysBFN/hydra/mp20_csp_s10 # modify according to your path
 ```
 3. Run the code to sample and eval
 ```
