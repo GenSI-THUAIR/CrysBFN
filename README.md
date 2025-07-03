@@ -68,7 +68,7 @@ MODEL_PATH=/data/wuhl/CrysBFN/hydra/mp20_csp_s10 # modify according to your path
 3. Run the code to sample and eval
 ```
 cd ..
-bash scripts/csp_scripts/mpts52_eval.sh
+bash scripts/csp_scripts/mp20_eval.sh
 ```
 ### Toy Example
 We provide toy examples with minimal components illustrating how BFNs work in `./toy_example`.
