@@ -1,5 +1,7 @@
 ## [ICLR 2025 Spotlight] A Periodic Bayesian Flow for Material Generation (CrysBFN) 
 
+[2025/07] We upload the pretrained checkpoints [here](https://drive.google.com/drive/folders/1W5kGiZYFRJZiyKyTwCdcPk9lbjTsTCO-?usp=drive_link) with instructions below.
+
 This is the implementation code for ICLR 2025 Spotlight paper CrysBFN.
 
 [\[paper\]](arxiv.org/pdf/2502.02016) 
