@@ -54,7 +54,6 @@ def load_config(model_path):
         cfg = compose(config_name='hparams')
     return cfg
 
-
 def load_model(model_path, load_data=True, testing=True):
     with initialize_config_dir(str(model_path)):
         cfg = compose(config_name='hparams')
@@ -66,11 +65,14 @@ def load_model(model_path, load_data=True, testing=True):
             _recursive_=False,
         )
         ckpts = list(model_path.glob('*.ckpt'))
-        ema_ckpts = list(model_path.glob('ema_*.ckpt'))
-        if len(ema_ckpts) > 0:
+        ema_ckpts = list(model_path.glob('ema*.ckpt'))
+        ema_state_dict_ckpts = list(model_path.glob('ema*.ckpt.ema_state_dict'))
+        if len(ema_ckpts) > 0: # if there are ema checkpoints, use them
             ckpts = ema_ckpts
+        if len(ema_state_dict_ckpts) > 0: # if there are ema state dict checkpoints, use them
+            ckpts = ema_state_dict_ckpts
+        
         if len(ckpts) > 0:
-            # print([ckpt.parts[-1].split('-') for ckpt in ckpts])
             ckpt_epochs = np.array(
                 [int(ckpt.parts[-1].split('-')[-2].split('=')[1]) for ckpt in ckpts])
             ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
@@ -78,27 +80,37 @@ def load_model(model_path, load_data=True, testing=True):
         else:
             raise FileNotFoundError('No checkpoint found')
         
-        if EMACallback in torch.load(ckpt)['callbacks'].keys():
-            ema_state = torch.load(ckpt)['callbacks'][EMACallback]
-            print('load ema state dict!!!')
-            ema_state_dict = ema_state['ema_state_dict']
+        # process according to ckpt type
+        if ckpt.endswith('.ema_state_dict'):
+            print('Loading model from ema state dict:', ckpt)
+            ema_state_dict = torch.load(ckpt)
             model.load_state_dict(ema_state_dict)
-        else:
-            model = model.load_from_checkpoint(ckpt)
-        model.lattice_scaler = torch.load(model_path / 'lattice_scaler.pt')
-        model.scaler = torch.load(model_path / 'prop_scaler.pt')
-        if os.path.exists(model_path / 'cart_coord_scaler.pt'):
-            model.cart_scaler = torch.load(model_path / 'cart_coord_scaler.pt')
-        else:
-            model.cart_scaler = None
+        
+        if ckpt.endswith('.ckpt'):
+            if EMACallback in torch.load(ckpt)['callbacks'].keys():
+                # with ema
+                ema_state = torch.load(ckpt)['callbacks'][EMACallback]
+                print('load ema state dict!!!')
+                ema_state_dict_path = f'{ckpt}.ema_state_dict' # pytorch state_dict
+                ema_state_dict = ema_state['ema_state_dict']
+                if not os.path.exists(ema_state_dict_path):
+                    torch.save(ema_state_dict, ema_state_dict_path)
+                    print('save ema state dict to:', ema_state_dict_path)
+                model.load_state_dict(ema_state_dict)
+            else:
+                # pytorch lightning checkpoint
+                model = model.load_from_checkpoint(ckpt)
+        # model.lattice_scaler = torch.load(model_path / 'lattice_scaler.pt')
+        # model.scaler = torch.load(model_path / 'prop_scaler.pt')
+        # if os.path.exists(model_path / 'cart_coord_scaler.pt'):
+        #     model.cart_scaler = torch.load(model_path / 'cart_coord_scaler.pt')
+        # else:
+        #     model.cart_scaler = None
 
         if load_data:
             datamodule = hydra.utils.instantiate(
-                cfg.data.datamodule, _recursive_=False, scaler_path=model_path
+                cfg.data.datamodule, _recursive_=False, scaler_path=None
             )
-            datamodule.setup()
-            model.train_loader = datamodule.train_dataloader()
-            print('load train loader succ')
             if testing:
                 datamodule.setup('test')
                 test_loader = datamodule.test_dataloader()[0]
@@ -109,7 +121,6 @@ def load_model(model_path, load_data=True, testing=True):
             test_loader = None
 
     return model, test_loader, cfg
-
 
 def get_crystals_list(
         frac_coords, atom_types, lengths, angles, num_atoms):

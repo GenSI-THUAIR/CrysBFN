@@ -68,23 +68,6 @@ class CrysBFN(bfnBase):
         self.cond_acc = cond_acc
         
         self.sch_type = sch_type
-        # if sch_type == 'linear':
-        #     acc_schedule = AccuracySchedule(
-        #         n_steps=self.dtime_loss_steps, beta1=self.beta1_coord, device=self.device)
-        #     self.beta_schedule = acc_schedule.find_beta()
-        #     self.beta_schedule = torch.tensor(
-        #                             [0.] + self.beta_schedule.cpu().numpy().tolist()).to(self.device)
-        #     acc_sch = self.alpha_wrt_index(torch.arange(1, dtime_loss_steps+1).to(device).unsqueeze(-1),
-        #                               dtime_loss_steps, beta1_coord, sch_type='linear').squeeze(-1)
-        #     self.acc_diff_mean = acc_schedule.analyze_acc_diff(acc_sch)
-        # elif sch_type == 'exp':
-        #     acc_schedule = AccuracySchedule(
-        #         n_steps=self.dtime_loss_steps, beta1=self.beta1_coord, device=self.device)
-        #     self.beta_schedule = acc_schedule.find_diff_beta()
-        #     self.beta_schedule = torch.tensor(
-        #                             [0.] + self.beta_schedule.cpu().numpy().tolist()).to(self.device)
-        # else:
-        #     raise NotImplementedError
         
         alphas = self.alpha_wrt_index(torch.arange(1, dtime_loss_steps+1).to(device).unsqueeze(-1),
                                       dtime_loss_steps, beta1_coord).squeeze(-1)
@@ -128,24 +111,10 @@ class CrysBFN(bfnBase):
     def alpha_wrt_index(self, t_index_per_atom, N, beta1, sch_type='exp'):
         assert (t_index_per_atom >= 1).all() and (t_index_per_atom <= N).all()
         sch_type = self.hparams.BFN.sch_type
-        if sch_type == 'exp' and not self.hparams.BFN.sim_cir_flow:
-            assert len(t_index_per_atom.shape) == 2
-            beta_i = self.beta_circ_wrt_t(t=t_index_per_atom)
-            beta_prev = self.beta_circ_wrt_t(t=t_index_per_atom-1)
-            alpha_i = beta_i - beta_prev
-        elif sch_type == 'exp' and self.hparams.BFN.sim_cir_flow:
-            fname = str(PROJECT_ROOT) + f'/cache_files/diff_sch_alphas_s{int(self.dtime_loss_steps)}_{self.beta1_coord}.pt'
-            acc_schedule = torch.load(fname).to(self.device)
-            return acc_schedule[t_index_per_atom.long()-1]
-        elif sch_type == 'linear':
+        if sch_type == 'linear':
             fname = str(PROJECT_ROOT) + f'/cache_files/linear_entropy_alphas_s{int(self.dtime_loss_steps)}_{self.beta1_coord}.pt'
             acc_schedule = torch.load(fname).to(self.device)
             return acc_schedule[t_index_per_atom.long()-1]
-        elif sch_type == 'add':
-            t_i = t_index_per_atom 
-            t_i_prev = t_index_per_atom - 1
-            alpha_i = self.beta_circ_wrt_t(t=t_i, beta1=self.beta1_coord)\
-                        - self.beta_circ_wrt_t(t=t_i_prev, beta1=self.beta1_coord)
         else:
             raise NotImplementedError
         return alpha_i
@@ -400,110 +369,85 @@ class CrysBFN(bfnBase):
     ):
         start_idx = 1
         traj = []
-        # low noise sampling
-        if 'n_samples' in self.hparams.keys():
-            samp_acc_factor = int(self.hparams.n_samples) if int(samp_acc_factor) == 1 else samp_acc_factor
-        
-        rand_back = False
-        back_sampling = False if 'back_sampling' not in kwargs.keys() else kwargs['back_sampling']
-        sample_passes = 1
-        
-        print(f"Sampling with low noise with factor, {samp_acc_factor}, perform rejection sampling. {self.rej_samp}, \
-                        back sampling {back_sampling}, sample_passes {sample_passes}, rand_back {rand_back}")
-        
-        ret_type, ret_coord_pred, ret_lattice_pred = None, None, None
-        for sample_pass_idx in range(sample_passes):
-            print(f"Sample pass {sample_pass_idx}\n")
-            num_molecules, mu_pos_t, theta_type_t, mu_lattices_t, log_acc, num_atoms, segment_ids = self.init_params(
-                        num_atoms, segment_ids, batch, samp_acc_factor,start_idx=start_idx, method='rand')
-            # sampling loop
-            for i in tqdm(range(1,sample_steps+1),desc='Sampling',disable=not show_bar):
-                t_index = i * torch.ones((num_molecules, )).to(self.device)
-                t_index_per_atom = t_index.repeat_interleave(num_atoms, dim=0).unsqueeze(-1)
-                t_cts = torch.ones((num_molecules, 1)).to(self.device) * (i - 1) / sample_steps
-                t_cts_per_atom = t_cts.repeat_interleave(num_atoms, dim=0)
-                # interdependency modeling
-                gamma_lattices = 1 - torch.pow(self.sigma1_lattice, 2 * t_cts)
-                
-                p_out_type, coord_pred, lattice_pred = \
-                        self.interdependency_modeling(
-                        t_index=t_index,
-                        t_per_atom=None,
-                        theta_type=theta_type_t,
-                        mu_pos_t=mu_pos_t,
-                        segment_ids=segment_ids,
-                        mu_lattices_t_33=mu_lattices_t,
-                        gamma_lattices=gamma_lattices,
-                        num_atoms=num_atoms,
-                        log_acc=log_acc
-                    )
-                # update the parameters via end back
-                # sample generation for discrete data/type
-                p_out_type = torch.where(torch.isnan(p_out_type), torch.zeros_like(p_out_type), p_out_type)
-                p_out_type = torch.clamp(p_out_type, min=1e-6)
-                if self.end_back and i + 1 <= sample_steps:
-                    tplus1 = (t_cts_per_atom + 1 / sample_steps).clamp(0, 1)
-                    tplus1_per_mol = (t_cts + 1 / sample_steps).clamp(0, 1)
-                    tplus1_index_per_atom = t_index_per_atom + 1
-                    cir_x = p_helper.any2circle(coord_pred, self.T_min, self.T_max)
-                    cir_mu_pos_t, log_acc = self.circular_var_bayesian_flow_sim_sample(
-                        x=cir_x,
-                        t_index=tplus1_index_per_atom.squeeze(-1),
-                        beta1=self.beta1_coord,
-                        n_samples=int(samp_acc_factor)
-                    )
-                    mu_pos_t = p_helper.circle2any(
-                                cir_mu_pos_t, 
-                                self.T_min, self.T_max)
 
-                    theta_type_t = self.discrete_var_bayesian_flow(
-                        t=tplus1,
-                        beta1=self.beta1_type,
-                        x=p_out_type,
-                        K=self.K,)
-                    mu_lattices_t = self.continuous_var_bayesian_flow(
-                        x=lattice_pred,
-                        t=tplus1_per_mol,
-                        sigma1=self.sigma1_lattice,
-                        # n_samples=int(samp_acc_factor)
-                    )[0]
-                    
-                    # add trajectory
-                    # if 'debug_mode' in self.hparams.logging.keys() and self.hparams.logging.debug_mode:
-                    if 'return_traj' in kwargs.keys() and kwargs['return_traj']:
-                        traj_lattices = lattice_pred * self.hparams.data.lattice_std + self.hparams.data.lattice_mean
-                        lengths_pred, angles_pred = lattices_to_params_shape(traj_lattices.reshape(-1,3,3)) 
-                        sample_pred = torch.distributions.Categorical(probs=p_out_type).sample()
-                        type_pred = F.one_hot(sample_pred, num_classes=self.K).argmax(dim=-1).cpu()
-                        inverse_map = {v: k for k, v in self.atom_type_map.items()}
-                        traj.append({
-                            'log_acc': log_acc.cpu(),
-                            'frac_coords': p_helper.any2frac(coord_pred,eval(str(self.T_min)),eval(str(self.T_max))).cpu(),
-                            'atom_types': torch.tensor([inverse_map[type.item()] for type in type_pred], device=self.device).cpu(),
-                            'lengths': lengths_pred.cpu(),
-                            'angles': angles_pred.cpu(),
-                            'segment_ids': segment_ids.cpu(),
-                            'num_atoms': num_atoms.cpu()
-                        })
-            if rand_back:
-                ret_lattice_pred = lattice_pred
-                ret_coord_pred = coord_pred
-                ret_type = p_out_type
-                continue
-        
-        ret_type = p_out_type if ret_type is None else ret_type
-        ret_lattice_pred = lattice_pred if ret_lattice_pred is None else ret_lattice_pred
-        ret_coord_pred = coord_pred if ret_coord_pred is None else ret_coord_pred
+        num_molecules, mu_pos_t, theta_type_t, mu_lattices_t, log_acc, num_atoms, segment_ids = self.init_params(
+                    num_atoms, segment_ids, batch, samp_acc_factor,start_idx=start_idx, method='rand')
+        # sampling loop
+        for i in tqdm(range(1,sample_steps+1),desc='Sampling',disable=not show_bar):
+            t_index = i * torch.ones((num_molecules, )).to(self.device)
+            t_index_per_atom = t_index.repeat_interleave(num_atoms, dim=0).unsqueeze(-1)
+            t_cts = torch.ones((num_molecules, 1)).to(self.device) * (i - 1) / sample_steps
+            t_cts_per_atom = t_cts.repeat_interleave(num_atoms, dim=0)
+            # interdependency modeling
+            gamma_lattices = 1 - torch.pow(self.sigma1_lattice, 2 * t_cts)
+            
+            p_out_type, coord_pred, lattice_pred = \
+                    self.interdependency_modeling(
+                    t_index=t_index,
+                    t_per_atom=None,
+                    theta_type=theta_type_t,
+                    mu_pos_t=mu_pos_t,
+                    segment_ids=segment_ids,
+                    mu_lattices_t_33=mu_lattices_t,
+                    gamma_lattices=gamma_lattices,
+                    num_atoms=num_atoms,
+                    log_acc=log_acc
+                )
+            # update the parameters via end back
+            # sample generation for discrete data/type
+            p_out_type = torch.where(torch.isnan(p_out_type), torch.zeros_like(p_out_type), p_out_type)
+            p_out_type = torch.clamp(p_out_type, min=1e-6)
+            if self.end_back and i + 1 <= sample_steps:
+                tplus1 = (t_cts_per_atom + 1 / sample_steps).clamp(0, 1)
+                tplus1_per_mol = (t_cts + 1 / sample_steps).clamp(0, 1)
+                tplus1_index_per_atom = t_index_per_atom + 1
+                cir_x = p_helper.any2circle(coord_pred, self.T_min, self.T_max)
+                cir_mu_pos_t, log_acc = self.circular_var_bayesian_flow_sim_sample(
+                    x=cir_x,
+                    t_index=tplus1_index_per_atom.squeeze(-1),
+                    beta1=self.beta1_coord,
+                    n_samples=int(samp_acc_factor)
+                )
+                mu_pos_t = p_helper.circle2any(
+                            cir_mu_pos_t, 
+                            self.T_min, self.T_max)
+
+                theta_type_t = self.discrete_var_bayesian_flow(
+                    t=tplus1,
+                    beta1=self.beta1_type,
+                    x=p_out_type,
+                    K=self.K,)
+                mu_lattices_t = self.continuous_var_bayesian_flow(
+                    x=lattice_pred,
+                    t=tplus1_per_mol,
+                    sigma1=self.sigma1_lattice,
+                    # n_samples=int(samp_acc_factor)
+                )[0]
                 
-        sample_pred = torch.distributions.Categorical(probs=ret_type).sample()
-        # sample_pred = torch.distributions.Categorical(probs=ret_type).mode
+                # add trajectory
+                # if 'debug_mode' in self.hparams.logging.keys() and self.hparams.logging.debug_mode:
+                if 'return_traj' in kwargs.keys() and kwargs['return_traj']:
+                    traj_lattices = lattice_pred * self.hparams.data.lattice_std + self.hparams.data.lattice_mean
+                    lengths_pred, angles_pred = lattices_to_params_shape(traj_lattices.reshape(-1,3,3)) 
+                    sample_pred = torch.distributions.Categorical(probs=p_out_type).sample()
+                    type_pred = F.one_hot(sample_pred, num_classes=self.K).argmax(dim=-1).cpu()
+                    inverse_map = {v: k for k, v in self.atom_type_map.items()}
+                    traj.append({
+                        'log_acc': log_acc.cpu(),
+                        'frac_coords': p_helper.any2frac(coord_pred,eval(str(self.T_min)),eval(str(self.T_max))).cpu(),
+                        'atom_types': torch.tensor([inverse_map[type.item()] for type in type_pred], device=self.device).cpu(),
+                        'lengths': lengths_pred.cpu(),
+                        'angles': angles_pred.cpu(),
+                        'segment_ids': segment_ids.cpu(),
+                        'num_atoms': num_atoms.cpu()
+                    })
+        
+        sample_pred = torch.distributions.Categorical(probs=p_out_type).sample()
         k_final = F.one_hot(sample_pred, num_classes=self.K)
         
-        if 'return_traj' in kwargs.keys() and kwargs['return_traj']:
-            return k_final, ret_coord_pred, ret_lattice_pred, traj
-        return k_final, ret_coord_pred, ret_lattice_pred
+        return k_final, coord_pred, lattice_pred
     
-@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default")
+@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default",version_base="1.1")
 def main(cfg: omegaconf.DictConfig):
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(
         cfg.data.datamodule, _recursive_=False

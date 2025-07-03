@@ -104,7 +104,7 @@ class Crystal(object):
 class RecEval(object):
 
     def __init__(self, pred_crys, gt_crys, stol=0.5, angle_tol=10, ltol=0.3):
-        assert len(pred_crys) == len(gt_crys)
+        assert len(pred_crys) == len(gt_crys), f'len pred {len(pred_crys)} != len gt {len(gt_crys)}'
         self.matcher = StructureMatcher(
             stol=stol, angle_tol=angle_tol, ltol=ltol)
         self.preds = pred_crys
@@ -124,7 +124,7 @@ class RecEval(object):
         validity = [c.valid for c in self.preds]
 
         rms_dists = []
-        for i in tqdm(range(len(self.preds)),disable=True):
+        for i in tqdm(range(len(self.preds)),disable=False, desc='Match crystals'):
             rms_dists.append(process_one(
                 self.preds[i], self.gts[i], validity[i]))
         rms_dists = np.array(rms_dists)

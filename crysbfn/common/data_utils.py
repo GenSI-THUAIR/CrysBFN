@@ -22,7 +22,8 @@ from networkx.algorithms.components import is_connected
 from sklearn.metrics import accuracy_score, recall_score, precision_score
 
 from torch_scatter import scatter
-
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 from p_tqdm import p_umap
 
 
@@ -114,12 +115,12 @@ def build_crystal_graph(crystal, graph_method='crystalnn'):
     """
     if graph_method == 'crystalnn':
         from pymatgen.analysis.graphs import StructureGraph
-        crystal_graph = StructureGraph.with_local_env_strategy(crystal, CrystalNN)
+        crystal_graph = StructureGraph.from_local_env_strategy(crystal, CrystalNN)
     elif graph_method == 'none':
         pass
     elif graph_method == 'minimum_distance':
         from pymatgen.analysis.graphs import StructureGraph
-        crystal_graph = StructureGraph.with_local_env_strategy(crystal, local_env.MinimumDistanceNN(cutoff=30,tol=0.3))
+        crystal_graph = StructureGraph.from_local_env_strategy(crystal, local_env.MinimumDistanceNN(cutoff=30,tol=0.3))
     else:    
         raise NotImplementedError
 
@@ -925,7 +926,6 @@ import matplotlib.pyplot as plt
 CrystalNNFP = CrystalNNFingerprint.from_preset("ops")
 CompFP = ElementProperty.from_preset('magpie')
 import pymatgen as pmg
-import ray
 
 class Crystal(object):
     def __init__(self, crys_array_dict, run_func_timeout=1800, species_tolerence=100, check_comp=True):
@@ -1074,12 +1074,6 @@ def vis_crystal(crys:Crystal):
 from multiprocessing import set_start_method, get_context
 set_start_method("spawn")
 
-@ray.remote
-def ray_crys_map(x, disc=None):
-    import warnings
-    # print(disc if disc is not None else disc)
-    warnings.filterwarnings('ignore', category=UserWarning, module='pymatgen.analysis.local_env')
-    return Crystal(x, species_tolerence=8)
 
 def lattices_to_params_shape(lattices):
     lengths = torch.sqrt(torch.sum(lattices ** 2, dim=-1))
@@ -1141,7 +1135,7 @@ class PeriodHelper:
     @staticmethod
     def circle2any(pos, T_min, T_max):
         '''
-        [-pi, pi] -> [T_min, T_max)
+        [-pi, pi) -> [T_min, T_max)
         '''
         assert not torch.isnan(pos).any(), f"pos: {pos}"
         assert torch.all(pos >= -np.pi) and torch.all(pos <= np.pi)
@@ -1171,7 +1165,7 @@ class PeriodHelper:
     @staticmethod
     def circle2frac(pos):
         '''
-        [-pi, pi] -> [0,1]
+        [-pi, pi) -> [0,1]
         '''
         assert torch.all(pos >= -np.pi) and torch.all(pos < np.pi)
         # frac = PeriodHelper.any2frac(pos, -np.pi, np.pi)

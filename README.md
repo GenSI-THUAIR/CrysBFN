@@ -1,5 +1,9 @@
 ## [ICLR 2025 Spotlight] A Periodic Bayesian Flow for Material Generation (CrysBFN) 
-This is the official implementation code for ICLR 2025 Spotlight paper CrysBFN.
+
+> [!IMPORTANT]
+> [2025/07] We upload the pretrained checkpoints [here](https://drive.google.com/drive/folders/1W5kGiZYFRJZiyKyTwCdcPk9lbjTsTCO-?usp=drive_link) with instructions below.
+
+This is the implementation code for ICLR 2025 Spotlight paper CrysBFN.
 
 [\[paper\]](arxiv.org/pdf/2502.02016) 
 [\[website\]](https://t.co/a4x4qlROH7)
@@ -19,12 +23,12 @@ And here is the visualization of the unified BFN generation framework
 ## Install
 ### 1. Set up environment variables
 Firstly please set up dot environment variables in .env file.
-- `PROJECT_ROOT`: path to the folder that contains this repo
-- `HYDRA_JOBS`: path to a folder to store hydra outputs
-- `WABDB`: path to a folder to store wabdb outputs
+- `PROJECT_ROOT`: path to the folder that contains this repo. e.g. /data/wuhl/CrysBFN
+- `HYDRA_JOBS`: path to a folder to store hydra outputs. This is the directory where we store checkpoints. e.g. /data/wuhl/CrysBFN/hydra
+- `WABDB`: path to a folder to store wandb outputs e.g. /data/wuhl/CrysBFN/wandb
 
 ### 2. Install with Mamba
-We recommend using [Mamba](https://github.com/conda-forge/miniforge) or conda (with libmamba solver) to build the python environment. 
+We recommend using [Mamba](https://github.com/conda-forge/miniforge) or conda (with libmamba solver) to build the python environment. It may take several minutes to solve the environment—please wait patiently.
 ```
 conda env create -f environment.yml
 conda activate crysbfn
@@ -38,14 +42,33 @@ For launching a de novo generation task training experiment, please use the foll
 ```
 bash ./scripts/gen_scripts/mp20_exps.sh
 ```
+Every first run on each dataset requires longer time (< 1 hour) for preparing the cache processed data.
 For launching a crystal structure prediction task training experiment, please use the following code:
 ```
-bash ./scripts/gen_scripts/mp20_exps.sh
+bash ./scripts/csp_scripts/mp20_exps.sh
 ```
 ### Sampling and Evaluating
 After training, please modify the MODEL_PATH variable as the hydra directory of the training experiment. Then, use the below code to generate and evaluating samples.
 ```
 bash scripts/csp_scripts/eval_mp20.sh
+```
+
+### Use Our Checkpoints
+We provide our checkpoints [here](https://drive.google.com/drive/folders/1W5kGiZYFRJZiyKyTwCdcPk9lbjTsTCO-?usp=drive_link). Here is a fastest example (NFE=10) to use the checkpoint to verify your installation:
+
+1. Download the zip file into the hydra directory and unzip it
+```
+cd hydra
+unzip ./mp20_csp_s10.zip
+```
+2. Modify the first line in `scripts/csp_scripts/mp20_eval.sh`
+```
+MODEL_PATH=/data/wuhl/CrysBFN/hydra/mp20_csp_s10 # modify according to your path
+```
+3. Run the code to sample and eval
+```
+cd ..
+bash scripts/csp_scripts/mpts52_eval.sh
 ```
 ### Toy Example
 We provide toy examples with minimal components illustrating how BFNs work in `./toy_example`.

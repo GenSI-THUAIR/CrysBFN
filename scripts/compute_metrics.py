@@ -1,4 +1,3 @@
-import ray
 import argparse
 import os
 import json
@@ -18,7 +17,7 @@ from pymatgen.analysis.structure_matcher import StructureMatcher
 from matminer.featurizers.site.fingerprint import CrystalNNFingerprint
 from matminer.featurizers.composition.composite import ElementProperty
 from func_timeout import func_timeout, FunctionTimedOut
-from crysbfn.common.data_utils import Crystal, ray_crys_map
+from crysbfn.common.data_utils import Crystal
 import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='pymatgen.analysis.local_env')
 print('WARNING: ignore pymatgen UserWarning')
@@ -26,8 +25,7 @@ from collections import Counter
 from eval_utils import (
     get_crystal_array_list_csp, smact_validity, structure_validity, CompScaler, get_fp_pdist,
     load_config, load_data, get_crystals_list, prop_model_eval, compute_cov,compute_cov_sep)
-import amd
-from amd.io import periodicset_from_pymatgen_structure
+
 from pymatgen.io.cif import CifBlock
 
 CrystalNNFP = CrystalNNFingerprint.from_preset("ops")
@@ -262,7 +260,6 @@ def get_crystal_array_list(file_path, batch_idx=0):
 
     return crys_array_list, true_crystal_array_list
 
-@ray.remote
 def get_gt_crys_ori(cif):
     structure = Structure.from_str(cif,fmt='cif')
     lattice = structure.lattice
@@ -278,27 +275,28 @@ def get_gt_crys_ori(cif):
 def main(args):
     all_metrics = {}
     use_ray = False
-    if ray.is_initialized():
-        ray.shutdown()
-    if use_ray:
-        ray.init()
     cfg = load_config(args.root_path)
     eval_model_name = cfg.data.eval_model_name
+
+    # prepare the cache files
+    if os.path.exists(cfg.data.root_path+'/test_crys_list.pt'):
+        gt_crys = torch.load(cfg.data.root_path+'/test_crys_list.pt')
+    else:
+        gt_path = cfg.data.root_path+'/test.csv'
+        csv = pd.read_csv(gt_path)
+        gt_crys = p_map(lambda x: get_gt_crys_ori(x), csv['cif'].tolist())
+        torch.save(gt_crys, cfg.data.root_path+'/test_crys_list.pt')
 
     if 'gen' in args.tasks:
         gen_file_path = get_file_paths(args.root_path, 'gen', args.label)
         crys_array_list, _ = get_crystal_array_list(gen_file_path)
         print('transforming gen crystals!')
-        if use_ray:
-            gen_crys = ray.get([ray_crys_map.remote(x) for x in crys_array_list])     
-        else:   
-            gen_crys = p_map(lambda x: Crystal(x), crys_array_list)
+        gen_crys = p_map(lambda x: Crystal(x), crys_array_list)
         if 'recon' not in args.tasks:
             gt_path = cfg.data.root_path+'/test.csv'
             csv = pd.read_csv(gt_path)
             print('transforming gt crystals!')
             gt_crys = torch.load(cfg.data.root_path+'/test_crys_list.pt')
-            # gt_crys = ray.get([get_gt_crys_ori.remote(x) for x in csv['cif']])
         gen_evaluator = GenEval(
             gen_crys, gt_crys, eval_model_name=eval_model_name)
         gen_metrics = gen_evaluator.get_metrics(get_prop=args.get_prop)
@@ -306,15 +304,9 @@ def main(args):
 
     if 'csp' in args.tasks:
         recon_file_path = get_file_paths(args.root_path, 'csp', args.label)
-        # recon_crys_cache_path = recon_file_path + f".{'multi' if args.multi_eval else ''}_eval.cache"
         batch_idx = -1 if args.multi_eval else 0
-        # if os.path.exists(recon_crys_cache_path):
-        #     crys_array_list = torch.load(recon_crys_cache_path)
-        # else:
         crys_array_list, true_crystal_array_list = get_crystal_array_list_csp(
             recon_file_path, batch_idx = batch_idx)
-            # torch.save(crys_array_list, recon_crys_cache_path)
-        gt_crys = torch.load(cfg.data.root_path+'/test_crys_list.pt')
 
         if not args.multi_eval:
             pred_crys = p_map(lambda x: Crystal(x,check_comp=False), crys_array_list)
@@ -323,8 +315,6 @@ def main(args):
             for i in range(len(crys_array_list)):
                 print(f"Processing batch {i}")
                 pred_crys.append(p_map(lambda x: Crystal(x,check_comp=False), crys_array_list[i]))   
-                # if i > 3:
-                #     break
 
         if args.multi_eval:
             rec_evaluator = RecEvalBatch(pred_crys, gt_crys[:len(pred_crys[0])])

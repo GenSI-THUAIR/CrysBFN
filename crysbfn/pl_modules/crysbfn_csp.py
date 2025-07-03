@@ -21,6 +21,7 @@ from crysbfn.pl_modules.base_model import build_mlp
 import scipy.stats as stats
 from crysbfn.common.linear_acc_search import AccuracySchedule
 import matplotlib.pyplot as plt
+import os
 from torch.distributions import VonMises
 
 class CrysBFN_CSP(bfnBase):
@@ -39,7 +40,7 @@ class CrysBFN_CSP(bfnBase):
         pred_mean = True,
         end_back=False,
         cond_acc = False,
-        sch_type='exp',
+        sch_type='linear',
         sim_cir_flow= True,
         **kwargs
     ):
@@ -70,25 +71,6 @@ class CrysBFN_CSP(bfnBase):
         self.cond_acc = cond_acc
         
         self.sch_type = sch_type
-        # if sch_type == 'linear':
-        #     acc_schedule = AccuracySchedule(
-        #         n_steps=self.dtime_loss_steps, beta1=self.beta1_coord, device=self.device)
-        #     self.beta_schedule = acc_schedule.find_beta()
-        #     self.beta_schedule = torch.tensor(
-        #                             [0.] + self.beta_schedule.cpu().numpy().tolist()).to(self.device)
-        #     acc_sch = self.alpha_wrt_index(torch.arange(1, dtime_loss_steps+1).to(device).unsqueeze(-1),
-        #                               dtime_loss_steps, beta1_coord, sch_type='linear').squeeze(-1)
-        #     self.acc_diff_mean = acc_schedule.analyze_acc_diff(acc_sch)
-        # elif sch_type == 'exp':
-        #     acc_schedule = AccuracySchedule(
-        #         n_steps=self.dtime_loss_steps, beta1=self.beta1_coord, device=self.device)
-        #     self.beta_schedule = acc_schedule.find_diff_beta()
-        #     self.beta_schedule = torch.tensor(
-        #                             [0.] + self.beta_schedule.cpu().numpy().tolist()).to(self.device)
-        # elif sch_type == 'add':
-        #     steps = torch.range(0,self.dtime_loss_steps,1, device=self.device)
-        #     t = steps / self.dtime_loss_steps
-        #     self.beta_schedule = t * self.beta1_coord** t
         
         alphas = self.alpha_wrt_index(torch.arange(1, dtime_loss_steps+1).to(device).unsqueeze(-1),
                                       dtime_loss_steps, beta1_coord).squeeze(-1)
@@ -98,11 +80,9 @@ class CrysBFN_CSP(bfnBase):
         self.vm_helper:VonMisesHelper = VonMisesHelper(cache_sampling=False,
                                                       device=self.device,
                                                       sample_alphas=alphas,
-                                                      num_vars=hparams.data.max_atoms*hparams.data.datamodule.batch_size.train*3,
                                                       )
         self.epsilon = torch.tensor(1e-7)
         self.norm_beta = False if not 'norm_beta' in self.hparams.keys() else hparams.norm_beta
-        self.rej_samp = False if not 'rej_samp' in self.hparams.keys() else hparams.rej_samp
     
     def circular_var_bayesian_update(self, m, c, y, alpha):
         '''
@@ -284,13 +264,12 @@ class CrysBFN_CSP(bfnBase):
         # [0,1) -> [T_min, T_max)
         pos = p_helper.frac2any(frac_coords % 1, self.T_min, self.T_max)
         # for anything related to Bayesian update, we need to transform to [-pi, pi)
-        if self.hparams.BFN.sim_cir_flow:
-            cir_mu_pos_t, log_acc = self.circular_var_bayesian_flow_sim(
-                                                x=p_helper.frac2circle(frac_coords%1), 
-                                                t_index=t_index.repeat_interleave(num_atoms, dim=0), 
-                                                beta1=self.beta1_coord,
-                                                n_samples=int(self.hparams.n_samples)
-                                                )
+        cir_mu_pos_t, log_acc = self.circular_var_bayesian_flow_sim(
+                                            x=p_helper.frac2circle(frac_coords%1), 
+                                            t_index=t_index.repeat_interleave(num_atoms, dim=0), 
+                                            beta1=self.beta1_coord,
+                                            n_samples=int(self.hparams.n_samples)
+                                            )
 
         mu_pos_t = p_helper.circle2any(cir_mu_pos_t, self.T_min, self.T_max)
         # lattice bayesian flow
@@ -370,7 +349,7 @@ class CrysBFN_CSP(bfnBase):
             tplus1_per_mol = (t_cts + 1 / sample_steps).clamp(0, 1)
             tplus1_index_per_atom = t_index_per_atom + 1
             cir_x = p_helper.any2circle(coord_pred, self.T_min, self.T_max)
-            cir_mu_pos_t, log_acc = self.circular_var_bayesian_flow_sim_sample(
+            cir_mu_pos_t, log_acc = self.circular_var_bayesian_flow_sim(
                 x=cir_x,
                 t_index=tplus1_index_per_atom.squeeze(-1),
                 beta1=self.beta1_coord,
@@ -431,80 +410,59 @@ class CrysBFN_CSP(bfnBase):
         if 'n_samples' in self.hparams.keys():
             samp_acc_factor = int(self.hparams.n_samples) if int(samp_acc_factor) == 1 else samp_acc_factor
         
-        rand_back = False
-        back_sampling = False if 'back_sampling' not in kwargs.keys() else kwargs['back_sampling']
-        sample_passes = 1
         
-        print(f"Sampling with low noise with factor, {samp_acc_factor}, perform rejection sampling. {self.rej_samp}, ",
-                        f"sample_passes {sample_passes}, rand_back {rand_back}, strategy {strategy} ")
-        
-        ret_coord_pred, ret_lattice_pred = None, None
-        for sample_pass_idx in range(sample_passes):
-            print(f"Sample pass {sample_pass_idx}\n")
             # num_molecules, mu_pos_t, theta_type_t, mu_lattices_t, log_acc, num_atoms, segment_ids
-            num_molecules, mu_pos_t, _, mu_lattices_t, log_acc, num_atoms, segment_ids, rho_lattice = self.init_params(
-                        num_atoms, segment_ids, batch, samp_acc_factor,start_idx=start_idx, method='rand')
-            # sampling loop
-            for i in tqdm(range(1,sample_steps+1),desc='Sampling',disable=not show_bar):
-                t_index = i * torch.ones((num_molecules, )).to(self.device)
-                t_index_per_atom = t_index.repeat_interleave(num_atoms, dim=0).unsqueeze(-1)
-                t_cts = torch.ones((num_molecules, 1)).to(self.device) * (i - 1) / sample_steps
-                t_cts_per_atom = t_cts.repeat_interleave(num_atoms, dim=0)
-                # interdependency modeling
-                gamma_lattices = 1 - torch.pow(self.sigma1_lattice, 2 * t_cts)
-                coord_pred, lattice_pred = \
-                        self.interdependency_modeling(
-                        atom_types=atom_types,
-                        t_index=t_index,
-                        mu_pos_t=mu_pos_t,
-                        segment_ids=segment_ids,
-                        mu_lattices_t=mu_lattices_t,
-                        gamma_lattices=gamma_lattices,
-                        num_atoms=num_atoms,
-                        log_acc=log_acc
-                    )
-                # update the parameters via end back
-                if strategy == 'end_back':
-                    mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
-                        self.update_params(i, sample_steps, coord_pred, lattice_pred, 
-                                           mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms, strategy='end_back')                    
-                elif strategy == 'vanilla':
-                    mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
-                        self.update_params(i, sample_steps, coord_pred, lattice_pred, 
-                                           mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms,'vanilla')
-                elif strategy == 'mix':
-                    if i < self.dtime_loss_steps * (2 / 3): # 600 for mp20
-                        mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
-                        self.update_params(i, sample_steps, coord_pred, lattice_pred, 
-                                           mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms, strategy='end_back')           
-                    else:
-                        mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
-                        self.update_params(i, sample_steps, coord_pred, lattice_pred, 
-                                           mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms,'vanilla')
-                else:
-                    raise NotImplementedError
-                # add trajectory
-                if 'debug_mode' in self.hparams.logging.keys() and self.hparams.logging.debug_mode:
-                    lengths_pred, angles_pred = lattices_to_params_shape(lattice_pred.reshape(-1,3,3)) 
-                    inverse_map = {v: k for k, v in self.atom_type_map.items()}
-                    traj.append({
-                        'log_acc': log_acc.cpu(),
-                        'frac_coords': p_helper.any2frac(coord_pred,eval(str(self.T_min)),eval(str(self.T_max))).cpu(),
-                        'atom_types': torch.tensor([inverse_map[type.item()] for type in atom_types], device=self.device).cpu(),
-                        'lengths': lengths_pred.cpu(),
-                        'angles': angles_pred.cpu(),
-                        'segment_ids': segment_ids.cpu(),
-                        'num_atoms': num_atoms.cpu()
-                    })
-        
-        ret_lattice_pred = lattice_pred if ret_lattice_pred is None else ret_lattice_pred
-        ret_coord_pred = coord_pred if ret_coord_pred is None else ret_coord_pred
-
-        if return_traj:
-            return ret_coord_pred, ret_lattice_pred, traj
-        return ret_coord_pred, ret_lattice_pred
+        num_molecules, mu_pos_t, _, mu_lattices_t, log_acc, num_atoms, segment_ids, rho_lattice = self.init_params(
+                    num_atoms, segment_ids, batch, samp_acc_factor,start_idx=start_idx, method='rand')
+        # sampling loop
+        for i in tqdm(range(1,sample_steps+1),desc='Sampling',disable=not show_bar):
+            t_index = i * torch.ones((num_molecules, )).to(self.device)
+            t_index_per_atom = t_index.repeat_interleave(num_atoms, dim=0).unsqueeze(-1)
+            t_cts = torch.ones((num_molecules, 1)).to(self.device) * (i - 1) / sample_steps
+            t_cts_per_atom = t_cts.repeat_interleave(num_atoms, dim=0)
+            # interdependency modeling
+            gamma_lattices = 1 - torch.pow(self.sigma1_lattice, 2 * t_cts)
+            coord_pred, lattice_pred = \
+                    self.interdependency_modeling(
+                    atom_types=atom_types,
+                    t_index=t_index,
+                    mu_pos_t=mu_pos_t,
+                    segment_ids=segment_ids,
+                    mu_lattices_t=mu_lattices_t,
+                    gamma_lattices=gamma_lattices,
+                    num_atoms=num_atoms,
+                    log_acc=log_acc
+                )
+            # update the parameters via end back
+            if strategy == 'end_back':
+                mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
+                    self.update_params(i, sample_steps, coord_pred, lattice_pred, 
+                                        mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms, strategy='end_back')                    
+            elif strategy == 'vanilla':
+                mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
+                    self.update_params(i, sample_steps, coord_pred, lattice_pred, 
+                                        mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms,'vanilla')
+            else:
+                raise NotImplementedError
+            # add trajectory
+            if 'debug_mode' in self.hparams.logging.keys() and self.hparams.logging.debug_mode:
+                lengths_pred, angles_pred = lattices_to_params_shape(lattice_pred.reshape(-1,3,3)) 
+                inverse_map = {v: k for k, v in self.atom_type_map.items()}
+                traj.append({
+                    'log_acc': log_acc.cpu(),
+                    'frac_coords': p_helper.any2frac(coord_pred,eval(str(self.T_min)),eval(str(self.T_max))).cpu(),
+                    'atom_types': torch.tensor([inverse_map[type.item()] for type in atom_types], device=self.device).cpu(),
+                    'lengths': lengths_pred.cpu(),
+                    'angles': angles_pred.cpu(),
+                    'segment_ids': segment_ids.cpu(),
+                    'num_atoms': num_atoms.cpu()
+                })
     
-@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default")
+        if return_traj:
+            return coord_pred, lattice_pred, traj
+        return coord_pred, lattice_pred
+    
+@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default",version_base="1.1")
 def main(cfg: omegaconf.DictConfig):
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(
         cfg.data.datamodule, _recursive_=False
