@@ -111,24 +111,10 @@ class CrysBFN(bfnBase):
     def alpha_wrt_index(self, t_index_per_atom, N, beta1, sch_type='exp'):
         assert (t_index_per_atom >= 1).all() and (t_index_per_atom <= N).all()
         sch_type = self.hparams.BFN.sch_type
-        if sch_type == 'exp' and not self.hparams.BFN.sim_cir_flow:
-            assert len(t_index_per_atom.shape) == 2
-            beta_i = self.beta_circ_wrt_t(t=t_index_per_atom)
-            beta_prev = self.beta_circ_wrt_t(t=t_index_per_atom-1)
-            alpha_i = beta_i - beta_prev
-        elif sch_type == 'exp' and self.hparams.BFN.sim_cir_flow:
-            fname = str(PROJECT_ROOT) + f'/cache_files/diff_sch_alphas_s{int(self.dtime_loss_steps)}_{self.beta1_coord}.pt'
-            acc_schedule = torch.load(fname).to(self.device)
-            return acc_schedule[t_index_per_atom.long()-1]
-        elif sch_type == 'linear':
+        if sch_type == 'linear':
             fname = str(PROJECT_ROOT) + f'/cache_files/linear_entropy_alphas_s{int(self.dtime_loss_steps)}_{self.beta1_coord}.pt'
             acc_schedule = torch.load(fname).to(self.device)
             return acc_schedule[t_index_per_atom.long()-1]
-        elif sch_type == 'add':
-            t_i = t_index_per_atom 
-            t_i_prev = t_index_per_atom - 1
-            alpha_i = self.beta_circ_wrt_t(t=t_i, beta1=self.beta1_coord)\
-                        - self.beta_circ_wrt_t(t=t_i_prev, beta1=self.beta1_coord)
         else:
             raise NotImplementedError
         return alpha_i
@@ -383,10 +369,7 @@ class CrysBFN(bfnBase):
     ):
         start_idx = 1
         traj = []
-        # low noise sampling
-        if 'n_samples' in self.hparams.keys():
-            samp_acc_factor = int(self.hparams.n_samples) if int(samp_acc_factor) == 1 else samp_acc_factor
-        
+
         num_molecules, mu_pos_t, theta_type_t, mu_lattices_t, log_acc, num_atoms, segment_ids = self.init_params(
                     num_atoms, segment_ids, batch, samp_acc_factor,start_idx=start_idx, method='rand')
         # sampling loop

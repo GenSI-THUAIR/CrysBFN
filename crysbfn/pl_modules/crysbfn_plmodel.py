@@ -151,7 +151,7 @@ class CrysBFN_PL_Model(BaseModule):
     @torch.no_grad()
     def sample(self,  num_samples=256, sample_steps=None, segment_ids=None, show_bar=False, samp_acc_factor=1.0, **kwargs):
         sample_loader = self.train_loader
-        print('use train_loader', sample_loader is not None)
+        # print('use train_loader', sample_loader is not None)
         sampling_batch = next(iter(sample_loader)).to(self.device) if sample_loader is not None else None      
         
         batch_size = self.hparams.data.datamodule.batch_size.val if num_samples is None else num_samples
@@ -183,29 +183,20 @@ class CrysBFN_PL_Model(BaseModule):
         else:
             type_final, coord_pred_final, lattice_pred_final = sample_res
         
-        # 把 [-pi, pi) 转为 [0, 1)
-        
+        #  [-pi, pi) -> [0, 1)
         frac_coords = p_helper.any2frac(coord_pred_final,eval(str(self.T_min)),eval(str(self.T_max)))
         
         assert frac_coords.min() >= 0 and frac_coords.max() < 1
-        # 把one-hot的type_final转为索引
-        if 'charge_loss' in self.hparams.BFN and self.hparams.BFN.charge_loss:
-            type_final = self.charge_decode(type_final[:, :1])
-        else:
-            type_final = type_final.argmax(dim=-1)
+        type_final = type_final.argmax(dim=-1)
         
         inverse_map = {v: k for k, v in self.atom_type_map.items()}
-        # 把type_final转为原来的atom_type
         
         atom_types = torch.tensor([inverse_map[type.item()] for type in type_final], device=self.device)
-        # 处理lattices
             
         lattices = lattice_pred_final.reshape(-1, 3, 3).cpu()
         lattices = lattices * self.hparams.data.lattice_std + self.hparams.data.lattice_mean
         
         lengths, angles = lattices_to_params_shape(torch.tensor(lattices))
-        # lengths_angles = list(map(self.lattice_matrix_to_params, lattices))
-        # lengths, angles = zip(*lengths_angles)
         
         lengths = torch.tensor(lengths, device=self.device)
         angles = torch.tensor(angles, device=self.device)
