@@ -72,7 +72,7 @@ def structure_prediction(loader, model:CrysBFN_CSP_PL_Model, num_evals, args=Non
         batch_lengths, batch_angles = [], []
         for eval_idx in range(num_evals):
             # print(f'batch {idx} / {len(loader)}, sample {eval_idx} / {num_evals}')
-            outputs = model.sample(batch,show_bar=False,**vars(args))
+            outputs = model.sample(batch,show_bar=True,**vars(args))
             batch_frac_coords.append(outputs['frac_coords'].detach().cpu())
             batch_num_atoms.append(outputs['num_atoms'].detach().cpu())
             batch_atom_types.append(outputs['atom_types'].detach().cpu())

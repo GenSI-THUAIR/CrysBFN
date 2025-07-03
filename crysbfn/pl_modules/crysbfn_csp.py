@@ -23,7 +23,6 @@ from crysbfn.common.linear_acc_search import AccuracySchedule
 import matplotlib.pyplot as plt
 import os
 from torch.distributions import VonMises
-from crysbfn.common.von_mises_fisher_cache import VonMisesFisherCache
 
 class CrysBFN_CSP(bfnBase):
     def __init__(
@@ -133,7 +132,7 @@ class CrysBFN_CSP(bfnBase):
         return logbeta * (torch.log(self.beta1_coord) - torch.log(self.epsilon)) + torch.log(self.epsilon)
     
     @torch.no_grad()
-    def circular_var_bayesian_flow_sim(self, x, t_index, beta1, n_samples=1, epsilon=1e-7, cache_sampling=False, cache_size=100000,cache_dir='./cache_files/vm_cache'):
+    def circular_var_bayesian_flow_sim(self, x, t_index, beta1, n_samples=1, epsilon=1e-7):
         '''
         the returned variable is in [-pi, pi)
         :param x: the input circular variable, shape (BxN, 3 or 1)
@@ -146,21 +145,7 @@ class CrysBFN_CSP(bfnBase):
         alpha_index = self.alpha_wrt_index(torch.arange(1, self.dtime_loss_steps+1).to(self.device).unsqueeze(-1).long(), self.dtime_loss_steps, beta1).squeeze(-1)
         alpha = alpha_index.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat(1,x.shape[0],x.shape[1],n_samples)
         # y = self.vm_helper.sample_cache(loc=x)
-
-        if cache_sampling:
-            cache_vm = VonMisesFisherCache(alpha_schedule=alpha_index, 
-                                            beta1=beta1, p=2, cache_size=cache_size, 
-                                            cache_dir=os.path.join(PROJECT_ROOT,cache_dir), 
-                                            overwrite_cache=False)
-            all_t_index = torch.arange(1, self.dtime_loss_steps+1).to(self.device).long()
-            all_t_index = all_t_index.view(-1,1,1).repeat(1, x.shape[0], x.shape[1])
-            # sample_t_index = sample_t_index.view(-1,1,1).expand_as(x[...,0])
-            # sample_t_index = t_index.unsqueeze(-1).repeat(1, 3)
-            vec_x = torch.stack([x.sin(), x.cos()], dim=-1)  # convert to vector
-            vec_y = cache_vm.sample(loc=vec_x, t_index=all_t_index)
-            y = torch.atan2(vec_y[...,0], vec_y[...,1]).unsqueeze(-1)  # convert to angle
-        else:  
-            y = self.vm_helper.sample(loc=x.unsqueeze(0).unsqueeze(-1).repeat(alpha.shape[0],1,1,n_samples), concentration=alpha, n_samples=1)
+        y = self.vm_helper.sample(loc=x.unsqueeze(0).unsqueeze(-1).repeat(alpha.shape[0],1,1,n_samples), concentration=alpha, n_samples=1)
         # sample prior
         prior_mu = (2*torch.pi*torch.rand((1,x.shape[0],x.shape[1]))-torch.pi).to(self.device)
         prior_cos, prior_sin = prior_mu.cos(), prior_mu.sin()
@@ -182,7 +167,7 @@ class CrysBFN_CSP(bfnBase):
         return poster_mu.detach(), poster_kappa.detach()
     
     @torch.no_grad()
-    def circular_var_bayesian_flow_sim_sample(self, x, t_index, beta1, n_samples=1, epsilon=1e-7, cache_sampling=False, cache_size=100000,cache_dir='cache_files/vm_cache'):
+    def circular_var_bayesian_flow_sim_sample(self, x, t_index, beta1, n_samples=1, epsilon=1e-7):
         '''
         the returned variable is in [-pi, pi)
         :param x: the input circular variable, shape (BxN, 3 or 1)
@@ -201,21 +186,8 @@ class CrysBFN_CSP(bfnBase):
         alpha_index = self.alpha_wrt_index(torch.arange(1, idx).to(self.device).long(), 
                                            self.dtime_loss_steps, beta1)
         alpha = alpha_index.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat(1,x.shape[0],x.shape[1],n_samples) # (idx-1, n_atoms, 3, n_samples)
-        if cache_sampling:
-            cache_vm = VonMisesFisherCache(alpha_schedule=alpha_index, 
-                                            beta1=beta1, p=2, cache_size=cache_size, 
-                                            cache_dir=os.path.join(PROJECT_ROOT,cache_dir), 
-                                            overwrite_cache=False)
-            all_t_index = torch.arange(1, self.dtime_loss_steps+1).to(self.device).long()
-            all_t_index = all_t_index.view(-1,1,1).repeat(1, x.shape[0], x.shape[1])
-            # sample_t_index = sample_t_index.view(-1,1,1).expand_as(x[...,0])
-            # sample_t_index = t_index.unsqueeze(-1).repeat(1, 3)
-            vec_x = torch.stack([x.sin(), x.cos()], dim=-1)  # convert to vector
-            vec_y = cache_vm.sample(loc=vec_x, t_index=all_t_index)
-            y = torch.atan2(vec_y[...,0], vec_y[...,1]).unsqueeze(-1)  # convert to angle
-        else:  
-            y = self.vm_helper.sample(loc=x.unsqueeze(0).unsqueeze(-1).repeat(alpha.shape[0],1,1,n_samples), 
-                                    concentration=alpha, n_samples=1)
+        y = self.vm_helper.sample(loc=x.unsqueeze(0).unsqueeze(-1).repeat(alpha.shape[0],1,1,n_samples), 
+                                  concentration=alpha, n_samples=1)
         # sample posterior
         poster_cos_cum, poster_sin_cum = (alpha * y.cos()).cumsum(dim=0).mean(-1), (alpha * y.sin()).cumsum(dim=0).mean(-1)
         # poster_cos_cum, poster_sin_cum = (alpha * y.cos()).cumsum(dim=1), (alpha * y.sin()).cumsum(dim=1)
@@ -438,66 +410,57 @@ class CrysBFN_CSP(bfnBase):
         if 'n_samples' in self.hparams.keys():
             samp_acc_factor = int(self.hparams.n_samples) if int(samp_acc_factor) == 1 else samp_acc_factor
         
-        sample_passes = 1
         
-        print(f"sample_passes {sample_passes}, strategy {strategy} ")
-        
-        ret_coord_pred, ret_lattice_pred = None, None
-        for sample_pass_idx in range(sample_passes):
-            print(f"Sample pass {sample_pass_idx}\n")
             # num_molecules, mu_pos_t, theta_type_t, mu_lattices_t, log_acc, num_atoms, segment_ids
-            num_molecules, mu_pos_t, _, mu_lattices_t, log_acc, num_atoms, segment_ids, rho_lattice = self.init_params(
-                        num_atoms, segment_ids, batch, samp_acc_factor,start_idx=start_idx, method='rand')
-            # sampling loop
-            for i in tqdm(range(1,sample_steps+1),desc='Sampling',disable=not show_bar):
-                t_index = i * torch.ones((num_molecules, )).to(self.device)
-                t_index_per_atom = t_index.repeat_interleave(num_atoms, dim=0).unsqueeze(-1)
-                t_cts = torch.ones((num_molecules, 1)).to(self.device) * (i - 1) / sample_steps
-                t_cts_per_atom = t_cts.repeat_interleave(num_atoms, dim=0)
-                # interdependency modeling
-                gamma_lattices = 1 - torch.pow(self.sigma1_lattice, 2 * t_cts)
-                coord_pred, lattice_pred = \
-                        self.interdependency_modeling(
-                        atom_types=atom_types,
-                        t_index=t_index,
-                        mu_pos_t=mu_pos_t,
-                        segment_ids=segment_ids,
-                        mu_lattices_t=mu_lattices_t,
-                        gamma_lattices=gamma_lattices,
-                        num_atoms=num_atoms,
-                        log_acc=log_acc
-                    )
-                # update the parameters via end back
-                if strategy == 'end_back':
-                    mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
-                        self.update_params(i, sample_steps, coord_pred, lattice_pred, 
-                                           mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms, strategy='end_back')                    
-                elif strategy == 'vanilla':
-                    mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
-                        self.update_params(i, sample_steps, coord_pred, lattice_pred, 
-                                           mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms,'vanilla')
-                else:
-                    raise NotImplementedError
-                # add trajectory
-                if 'debug_mode' in self.hparams.logging.keys() and self.hparams.logging.debug_mode:
-                    lengths_pred, angles_pred = lattices_to_params_shape(lattice_pred.reshape(-1,3,3)) 
-                    inverse_map = {v: k for k, v in self.atom_type_map.items()}
-                    traj.append({
-                        'log_acc': log_acc.cpu(),
-                        'frac_coords': p_helper.any2frac(coord_pred,eval(str(self.T_min)),eval(str(self.T_max))).cpu(),
-                        'atom_types': torch.tensor([inverse_map[type.item()] for type in atom_types], device=self.device).cpu(),
-                        'lengths': lengths_pred.cpu(),
-                        'angles': angles_pred.cpu(),
-                        'segment_ids': segment_ids.cpu(),
-                        'num_atoms': num_atoms.cpu()
-                    })
-        
-        ret_lattice_pred = lattice_pred if ret_lattice_pred is None else ret_lattice_pred
-        ret_coord_pred = coord_pred if ret_coord_pred is None else ret_coord_pred
-
+        num_molecules, mu_pos_t, _, mu_lattices_t, log_acc, num_atoms, segment_ids, rho_lattice = self.init_params(
+                    num_atoms, segment_ids, batch, samp_acc_factor,start_idx=start_idx, method='rand')
+        # sampling loop
+        for i in tqdm(range(1,sample_steps+1),desc='Sampling',disable=not show_bar):
+            t_index = i * torch.ones((num_molecules, )).to(self.device)
+            t_index_per_atom = t_index.repeat_interleave(num_atoms, dim=0).unsqueeze(-1)
+            t_cts = torch.ones((num_molecules, 1)).to(self.device) * (i - 1) / sample_steps
+            t_cts_per_atom = t_cts.repeat_interleave(num_atoms, dim=0)
+            # interdependency modeling
+            gamma_lattices = 1 - torch.pow(self.sigma1_lattice, 2 * t_cts)
+            coord_pred, lattice_pred = \
+                    self.interdependency_modeling(
+                    atom_types=atom_types,
+                    t_index=t_index,
+                    mu_pos_t=mu_pos_t,
+                    segment_ids=segment_ids,
+                    mu_lattices_t=mu_lattices_t,
+                    gamma_lattices=gamma_lattices,
+                    num_atoms=num_atoms,
+                    log_acc=log_acc
+                )
+            # update the parameters via end back
+            if strategy == 'end_back':
+                mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
+                    self.update_params(i, sample_steps, coord_pred, lattice_pred, 
+                                        mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms, strategy='end_back')                    
+            elif strategy == 'vanilla':
+                mu_pos_t, log_acc, mu_lattices_t, rho_lattice = \
+                    self.update_params(i, sample_steps, coord_pred, lattice_pred, 
+                                        mu_pos_t, log_acc, mu_lattices_t, rho_lattice, num_atoms,'vanilla')
+            else:
+                raise NotImplementedError
+            # add trajectory
+            if 'debug_mode' in self.hparams.logging.keys() and self.hparams.logging.debug_mode:
+                lengths_pred, angles_pred = lattices_to_params_shape(lattice_pred.reshape(-1,3,3)) 
+                inverse_map = {v: k for k, v in self.atom_type_map.items()}
+                traj.append({
+                    'log_acc': log_acc.cpu(),
+                    'frac_coords': p_helper.any2frac(coord_pred,eval(str(self.T_min)),eval(str(self.T_max))).cpu(),
+                    'atom_types': torch.tensor([inverse_map[type.item()] for type in atom_types], device=self.device).cpu(),
+                    'lengths': lengths_pred.cpu(),
+                    'angles': angles_pred.cpu(),
+                    'segment_ids': segment_ids.cpu(),
+                    'num_atoms': num_atoms.cpu()
+                })
+    
         if return_traj:
-            return ret_coord_pred, ret_lattice_pred, traj
-        return ret_coord_pred, ret_lattice_pred
+            return coord_pred, lattice_pred, traj
+        return coord_pred, lattice_pred
     
 @hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default",version_base="1.1")
 def main(cfg: omegaconf.DictConfig):
