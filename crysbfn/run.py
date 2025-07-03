@@ -1,9 +1,5 @@
-# if you are in China and wandb can not be used, please use the following code to use swanlab
-import swanlab
-swanlab.sync_wandb()
-import os
-os.environ["WANDB_MODE"] = "offline"  
-
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 from pathlib import Path
 from typing import List
 
@@ -19,17 +15,14 @@ from pytorch_lightning.callbacks import (
     EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
-    
 )
 from pytorch_lightning.loggers import WandbLogger
 from crysbfn.common.callbacks import Gradient_clip, EMACallback
+# from crysbfn.common.callbacks import GenEvalCallback, CSPEvalCallback
 from crysbfn.common.utils import log_hyperparameters, PROJECT_ROOT
-import warnings
 import multiprocess as mp
 mp.set_start_method('spawn', force=True)
 
-warnings.filterwarnings("ignore", category=UserWarning)
-hydra.utils.log.info("ignore UserWarnings")
 
 def build_callbacks(cfg: DictConfig, datamodule=None) -> List[Callback]:
     callbacks: List[Callback] = []
@@ -66,7 +59,8 @@ def build_callbacks(cfg: DictConfig, datamodule=None) -> List[Callback]:
                 verbose=cfg.train.model_checkpoints.verbose,
             )
         )
-    # callbacks.append(ReconEvalCallback(), )
+    # callbacks.append(GenEvalCallback(cfg=cfg, datamodule=datamodule), )
+    # callbacks.append(CSPEvalCallback(cfg=cfg, datamodule=datamodule), )
     
     hydra.utils.log.info("Adding callback <GradientClip>")
     callbacks.append(Gradient_clip(use_queue_clip=cfg.train.use_queue_clip), )

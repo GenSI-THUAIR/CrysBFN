@@ -1,5 +1,6 @@
 ## [ICLR 2025 Spotlight] A Periodic Bayesian Flow for Material Generation (CrysBFN) 
-This is the official implementation code for ICLR 2025 Spotlight paper CrysBFN.
+
+This is the implementation code for ICLR 2025 Spotlight paper CrysBFN.
 
 [\[paper\]](arxiv.org/pdf/2502.02016) 
 [\[website\]](https://t.co/a4x4qlROH7)
@@ -21,7 +22,7 @@ And here is the visualization of the unified BFN generation framework
 Firstly please set up dot environment variables in .env file.
 - `PROJECT_ROOT`: path to the folder that contains this repo. e.g. /data/wuhl/CrysBFN
 - `HYDRA_JOBS`: path to a folder to store hydra outputs. This is the directory where we store checkpoints. e.g. /data/wuhl/CrysBFN/hydra
-- `WABDB`: path to a folder to store wabdb outputs e.g. /data/wuhl/CrysBFN/wandb
+- `WABDB`: path to a folder to store wandb outputs e.g. /data/wuhl/CrysBFN/wandb
 
 ### 2. Install with Mamba
 We recommend using [Mamba](https://github.com/conda-forge/miniforge) or conda (with libmamba solver) to build the python environment. It may take several minutes to solve the environment—please wait patiently.
@@ -47,6 +48,24 @@ bash ./scripts/csp_scripts/mp20_exps.sh
 After training, please modify the MODEL_PATH variable as the hydra directory of the training experiment. Then, use the below code to generate and evaluating samples.
 ```
 bash scripts/csp_scripts/eval_mp20.sh
+```
+
+### Use Our Checkpoints
+We provide our checkpoints [here](https://drive.google.com/drive/folders/1W5kGiZYFRJZiyKyTwCdcPk9lbjTsTCO-?usp=drive_link). Here is an example to use the checkpoint:
+
+1. Download the zip file into the hydra directory and unzip it
+```
+cd hydra
+unzip ./mpts_csp_s500.zip
+```
+2. Modify the first line in `scripts/csp_scripts/mpts52_eval.sh`
+```
+MODEL_PATH=/data/wuhl/CrysBFN/hydra/mpts_csp_s500 # modify according to your path
+```
+3. Run the code to sample and eval
+```
+cd ..
+bash scripts/csp_scripts/mpts52_eval.sh
 ```
 ### Toy Example
 We provide toy examples with minimal components illustrating how BFNs work in `./toy_example`.

@@ -22,7 +22,8 @@ from networkx.algorithms.components import is_connected
 from sklearn.metrics import accuracy_score, recall_score, precision_score
 
 from torch_scatter import scatter
-
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 from p_tqdm import p_umap
 
 
@@ -925,7 +926,6 @@ import matplotlib.pyplot as plt
 CrystalNNFP = CrystalNNFingerprint.from_preset("ops")
 CompFP = ElementProperty.from_preset('magpie')
 import pymatgen as pmg
-# import ray
 
 class Crystal(object):
     def __init__(self, crys_array_dict, run_func_timeout=1800, species_tolerence=100, check_comp=True):
@@ -1074,12 +1074,6 @@ def vis_crystal(crys:Crystal):
 from multiprocessing import set_start_method, get_context
 set_start_method("spawn")
 
-# @ray.remote
-# def ray_crys_map(x, disc=None):
-#     import warnings
-#     # print(disc if disc is not None else disc)
-#     warnings.filterwarnings('ignore', category=UserWarning, module='pymatgen.analysis.local_env')
-#     return Crystal(x, species_tolerence=8)
 
 def lattices_to_params_shape(lattices):
     lengths = torch.sqrt(torch.sum(lattices ** 2, dim=-1))
